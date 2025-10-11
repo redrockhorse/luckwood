@@ -1135,20 +1135,21 @@ fun HistoricalMatchesCard(title: String, matches: List<HistoricalMatch>) {
             if (expanded) {
                 Spacer(modifier = Modifier.height(12.dp))
                 
-                matches.take(10).forEach { match ->
+                // 排序：is_same_opponent 为 true 的排在前面
+                val sortedMatches = matches.sortedByDescending { it.isSameOpponent }
+                
+                sortedMatches.forEach { match ->
                     HistoricalMatchItem(match)
                     Spacer(modifier = Modifier.height(8.dp))
                 }
                 
-                if (matches.size > 10) {
-                    Text(
-                        text = "共 ${matches.size} 场，仅显示前 10 场",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
+                Text(
+                    text = "共 ${matches.size} 场比赛",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
     }
