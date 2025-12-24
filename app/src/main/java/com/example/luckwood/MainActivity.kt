@@ -9,11 +9,15 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -1269,7 +1273,31 @@ fun SmallOddsItem(label: String, odds: Double) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LotteryScreen() {
-    NumberInputScreen()
+    var selectedTab by remember { mutableStateOf(0) } // 0: 号码预测, 1: 幸运选号
+    
+    Column(
+        modifier = Modifier.fillMaxSize()
+    ) {
+        // 标签选择
+        TabRow(selectedTabIndex = selectedTab) {
+            Tab(
+                selected = selectedTab == 0,
+                onClick = { selectedTab = 0 },
+                text = { Text("号码预测") }
+            )
+            Tab(
+                selected = selectedTab == 1,
+                onClick = { selectedTab = 1 },
+                text = { Text("幸运选号") }
+            )
+        }
+        
+        // 根据选中的标签显示不同的内容
+        when (selectedTab) {
+            0 -> NumberInputScreen()
+            1 -> LuckyNumberScreen()
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1759,6 +1787,314 @@ fun DateTimePickerDialog(
                     }
                 }
             )
+        }
+    }
+}
+
+// 幸运选号界面
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LuckyNumberScreen() {
+    var ssqResults by remember { mutableStateOf<SSQResponse?>(null) }
+    var dltResults by remember { mutableStateOf<DLTResponse?>(null) }
+    var isLoadingSSQ by remember { mutableStateOf(false) }
+    var isLoadingDLT by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    val coroutineScope = rememberCoroutineScope()
+    val scrollState = rememberScrollState()
+    
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(scrollState)
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Text(
+            text = "幸运选号",
+            fontSize = 24.sp,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        
+        // 两个小按钮：双色球/大乐透
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // 双色球按钮
+            Button(
+                onClick = {
+                    coroutineScope.launch {
+                        try {
+                            isLoadingSSQ = true
+                            errorMessage = null
+                            dltResults = null // 清空大乐透结果
+                            ssqResults = RetrofitClient.apiService.getSSQLuckyNumbers()
+                            isLoadingSSQ = false
+                        } catch (e: Exception) {
+                            isLoadingSSQ = false
+                            errorMessage = "加载失败: ${e.message}"
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp),
+                enabled = !isLoadingSSQ
+            ) {
+                if (isLoadingSSQ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                } else {
+                    Text("双色球", fontSize = 16.sp)
+                }
+            }
+            
+            // 大乐透按钮
+            Button(
+                onClick = {
+                    coroutineScope.launch {
+                        try {
+                            isLoadingDLT = true
+                            errorMessage = null
+                            ssqResults = null // 清空双色球结果
+                            dltResults = RetrofitClient.apiService.getDLTLuckyNumbers()
+                            isLoadingDLT = false
+                        } catch (e: Exception) {
+                            isLoadingDLT = false
+                            errorMessage = "加载失败: ${e.message}"
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp),
+                enabled = !isLoadingDLT
+            ) {
+                if (isLoadingDLT) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                } else {
+                    Text("大乐透", fontSize = 16.sp)
+                }
+            }
+        }
+        
+        // 错误提示
+        if (errorMessage != null) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer
+                )
+            ) {
+                Text(
+                    text = errorMessage!!,
+                    modifier = Modifier.padding(16.dp),
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+        }
+        
+        // 显示结果
+        if (ssqResults != null) {
+            SSQResultsDisplay(ssqResults!!)
+        }
+        
+        if (dltResults != null) {
+            DLTResultsDisplay(dltResults!!)
+        }
+    }
+}
+
+// 双色球结果显示
+@Composable
+fun SSQResultsDisplay(response: SSQResponse) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "${response.lotteryType} - 共${response.count}注",
+                fontSize = 18.sp,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+            )
+            
+            response.results.forEachIndexed { index, result ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "第${index + 1}注",
+                            fontSize = 14.sp,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
+                        )
+                        
+                        // 显示号码
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            // 前区号码（红球）
+                            result.frontNumbers.forEach { number ->
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .background(
+                                            color = MaterialTheme.colorScheme.error,
+                                            shape = CircleShape
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = number.toString(),
+                                        fontSize = 14.sp,
+                                        color = MaterialTheme.colorScheme.onError,
+                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                    )
+                                }
+                            }
+                            
+                            Text(
+                                text = "+",
+                                fontSize = 16.sp,
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            )
+                            
+                            // 后区号码（蓝球）
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .background(
+                                        color = MaterialTheme.colorScheme.primary,
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = result.backNumber.toString(),
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// 大乐透结果显示
+@Composable
+fun DLTResultsDisplay(response: DLTResponse) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "${response.lotteryType} - 共${response.count}注",
+                fontSize = 18.sp,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+            )
+            
+            response.results.forEachIndexed { index, result ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "第${index + 1}注",
+                            fontSize = 14.sp,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
+                        )
+                        
+                        // 显示号码
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            // 前区号码
+                            result.frontNumbers.forEach { number ->
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .background(
+                                            color = MaterialTheme.colorScheme.error,
+                                            shape = CircleShape
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = number.toString(),
+                                        fontSize = 14.sp,
+                                        color = MaterialTheme.colorScheme.onError,
+                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                    )
+                                }
+                            }
+                            
+                            Text(
+                                text = "+",
+                                fontSize = 16.sp,
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            )
+                            
+                            // 后区号码
+                            result.backNumbers.forEach { number ->
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .background(
+                                            color = MaterialTheme.colorScheme.primary,
+                                            shape = CircleShape
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = number.toString(),
+                                        fontSize = 14.sp,
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

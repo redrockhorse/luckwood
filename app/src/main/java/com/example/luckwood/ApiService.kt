@@ -12,6 +12,12 @@ import java.util.concurrent.TimeUnit
 interface FootballApiService {
     @POST("/api/v1/analysis/future-matches")
     suspend fun getFutureMatches(@Body request: MatchRequest): ApiResponse
+    
+    @retrofit2.http.GET("/api/v1/lottery/ssq")
+    suspend fun getSSQLuckyNumbers(): SSQResponse
+    
+    @retrofit2.http.GET("/api/v1/lottery/dlt")
+    suspend fun getDLTLuckyNumbers(): DLTResponse
 }
 
 // Retrofit实例

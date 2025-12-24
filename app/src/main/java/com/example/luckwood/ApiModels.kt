@@ -164,3 +164,47 @@ data class TeamAnalysis(
     val lossExpected: Double
 )
 
+// 幸运选号 - 双色球结果
+data class SSQResult(
+    @SerializedName("front_numbers")
+    val frontNumbers: List<Int>,
+    @SerializedName("back_number")
+    val backNumber: Int,
+    @SerializedName("front_missing")
+    val frontMissing: List<Int>,
+    @SerializedName("back_missing")
+    val backMissing: Int
+)
+
+// 幸运选号 - 大乐透结果
+data class DLTResult(
+    @SerializedName("front_numbers")
+    val frontNumbers: List<Int>,
+    @SerializedName("back_numbers")
+    val backNumbers: List<Int>,
+    @SerializedName("front_missing")
+    val frontMissing: List<Int>,
+    @SerializedName("back_missing")
+    val backMissing: List<Int>
+)
+
+// 幸运选号 - 双色球响应
+data class SSQResponse(
+    @SerializedName("count")
+    val count: Int,
+    @SerializedName("lottery_type")
+    val lotteryType: String,
+    @SerializedName("results")
+    val results: List<SSQResult>
+)
+
+// 幸运选号 - 大乐透响应
+data class DLTResponse(
+    @SerializedName("count")
+    val count: Int,
+    @SerializedName("lottery_type")
+    val lotteryType: String,
+    @SerializedName("results")
+    val results: List<DLTResult>
+)
+
