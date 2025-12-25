@@ -14,10 +14,14 @@ interface FootballApiService {
     suspend fun getFutureMatches(@Body request: MatchRequest): ApiResponse
     
     @retrofit2.http.GET("/api/v1/lottery/ssq")
-    suspend fun getSSQLuckyNumbers(): SSQResponse
+    suspend fun getSSQLuckyNumbers(
+        @retrofit2.http.Query("n") n: Int = 5
+    ): SSQResponse
     
     @retrofit2.http.GET("/api/v1/lottery/dlt")
-    suspend fun getDLTLuckyNumbers(): DLTResponse
+    suspend fun getDLTLuckyNumbers(
+        @retrofit2.http.Query("n") n: Int = 3
+    ): DLTResponse
 }
 
 // Retrofit实例

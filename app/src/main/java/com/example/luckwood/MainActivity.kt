@@ -1831,7 +1831,10 @@ fun LuckyNumberScreen() {
                             isLoadingSSQ = true
                             errorMessage = null
                             dltResults = null // 清空大乐透结果
-                            ssqResults = RetrofitClient.apiService.getSSQLuckyNumbers()
+                            // 调用API获取双色球幸运号码（默认5注）
+                            // 算法说明：从最新期（rows[-1]）的前区号码（遗漏为0）中随机选3个并剔除
+                            // 剔除后剩余3个遗漏为0的号码，然后基于遗漏次数中位数计算概率选号
+                            ssqResults = RetrofitClient.apiService.getSSQLuckyNumbers(n = 5)
                             isLoadingSSQ = false
                         } catch (e: Exception) {
                             isLoadingSSQ = false
@@ -1862,7 +1865,10 @@ fun LuckyNumberScreen() {
                             isLoadingDLT = true
                             errorMessage = null
                             ssqResults = null // 清空双色球结果
-                            dltResults = RetrofitClient.apiService.getDLTLuckyNumbers()
+                            // 调用API获取大乐透幸运号码（默认3注）
+                            // 算法说明：从最新期（rows[-1]）的前区号码（遗漏为0）中随机选3个并剔除
+                            // 剔除后剩余2个遗漏为0的号码，然后基于遗漏次数中位数计算概率选号
+                            dltResults = RetrofitClient.apiService.getDLTLuckyNumbers(n = 3)
                             isLoadingDLT = false
                         } catch (e: Exception) {
                             isLoadingDLT = false
@@ -1955,22 +1961,34 @@ fun SSQResultsDisplay(response: SSQResponse) {
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             // 前区号码（红球）
-                            result.frontNumbers.forEach { number ->
-                                Box(
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .background(
-                                            color = MaterialTheme.colorScheme.error,
-                                            shape = CircleShape
-                                        ),
-                                    contentAlignment = Alignment.Center
+                            result.frontNumbers.forEachIndexed { numIndex, number ->
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
-                                    Text(
-                                        text = number.toString(),
-                                        fontSize = 14.sp,
-                                        color = MaterialTheme.colorScheme.onError,
-                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .background(
+                                                color = MaterialTheme.colorScheme.error,
+                                                shape = CircleShape
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = number.toString(),
+                                            fontSize = 14.sp,
+                                            color = MaterialTheme.colorScheme.onError,
+                                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                        )
+                                    }
+                                    // 显示遗漏次数
+                                    if (numIndex < result.frontMissing.size) {
+                                        Text(
+                                            text = "${result.frontMissing[numIndex]}",
+                                            fontSize = 9.sp,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                        )
+                                    }
                                 }
                             }
                             
@@ -1981,20 +1999,30 @@ fun SSQResultsDisplay(response: SSQResponse) {
                             )
                             
                             // 后区号码（蓝球）
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .background(
-                                        color = MaterialTheme.colorScheme.primary,
-                                        shape = CircleShape
-                                    ),
-                                contentAlignment = Alignment.Center
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .background(
+                                            color = MaterialTheme.colorScheme.primary,
+                                            shape = CircleShape
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = result.backNumber.toString(),
+                                        fontSize = 14.sp,
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                    )
+                                }
+                                // 显示遗漏次数
                                 Text(
-                                    text = result.backNumber.toString(),
-                                    fontSize = 14.sp,
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                    text = "${result.backMissing}",
+                                    fontSize = 9.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                                 )
                             }
                         }
@@ -2047,22 +2075,34 @@ fun DLTResultsDisplay(response: DLTResponse) {
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             // 前区号码
-                            result.frontNumbers.forEach { number ->
-                                Box(
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .background(
-                                            color = MaterialTheme.colorScheme.error,
-                                            shape = CircleShape
-                                        ),
-                                    contentAlignment = Alignment.Center
+                            result.frontNumbers.forEachIndexed { numIndex, number ->
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
-                                    Text(
-                                        text = number.toString(),
-                                        fontSize = 14.sp,
-                                        color = MaterialTheme.colorScheme.onError,
-                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .background(
+                                                color = MaterialTheme.colorScheme.error,
+                                                shape = CircleShape
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = number.toString(),
+                                            fontSize = 14.sp,
+                                            color = MaterialTheme.colorScheme.onError,
+                                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                        )
+                                    }
+                                    // 显示遗漏次数
+                                    if (numIndex < result.frontMissing.size) {
+                                        Text(
+                                            text = "${result.frontMissing[numIndex]}",
+                                            fontSize = 9.sp,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                        )
+                                    }
                                 }
                             }
                             
@@ -2073,22 +2113,34 @@ fun DLTResultsDisplay(response: DLTResponse) {
                             )
                             
                             // 后区号码
-                            result.backNumbers.forEach { number ->
-                                Box(
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .background(
-                                            color = MaterialTheme.colorScheme.primary,
-                                            shape = CircleShape
-                                        ),
-                                    contentAlignment = Alignment.Center
+                            result.backNumbers.forEachIndexed { numIndex, number ->
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
-                                    Text(
-                                        text = number.toString(),
-                                        fontSize = 14.sp,
-                                        color = MaterialTheme.colorScheme.onPrimary,
-                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .background(
+                                                color = MaterialTheme.colorScheme.primary,
+                                                shape = CircleShape
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = number.toString(),
+                                            fontSize = 14.sp,
+                                            color = MaterialTheme.colorScheme.onPrimary,
+                                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                        )
+                                    }
+                                    // 显示遗漏次数
+                                    if (numIndex < result.backMissing.size) {
+                                        Text(
+                                            text = "${result.backMissing[numIndex]}",
+                                            fontSize = 9.sp,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                        )
+                                    }
                                 }
                             }
                         }
