@@ -4,9 +4,12 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -22,6 +25,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -255,7 +263,7 @@ fun FootballScreen(navController: NavHostController) {
             }
         }
         
-        // 查询按钮
+        // 查询比赛按钮
         Button(
             onClick = {
                 val startDate = if (startDateMillis != null) dateFormatter.format(Date(startDateMillis!!)) else ""
@@ -1270,16 +1278,27 @@ fun SmallOddsItem(label: String, odds: Double) {
     }
 }
 
+private fun formatIssueDate(issueDate: String): String {
+    return try {
+        val inputFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.getDefault())
+        inputFormat.timeZone = TimeZone.getTimeZone("UTC")
+        val outputFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val date = inputFormat.parse(issueDate)
+        if (date != null) outputFormat.format(date) else issueDate.take(10)
+    } catch (_: Exception) {
+        issueDate.take(10)
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LotteryScreen() {
-    var selectedTab by remember { mutableStateOf(0) } // 0: 号码预测, 1: 幸运选号
-    
+    var selectedTab by remember { mutableIntStateOf(0) }
+
     Column(
         modifier = Modifier.fillMaxSize()
     ) {
-        // 标签选择
-        TabRow(selectedTabIndex = selectedTab) {
+        ScrollableTabRow(selectedTabIndex = selectedTab) {
             Tab(
                 selected = selectedTab == 0,
                 onClick = { selectedTab = 0 },
@@ -1290,354 +1309,768 @@ fun LotteryScreen() {
                 onClick = { selectedTab = 1 },
                 text = { Text("幸运选号") }
             )
+            Tab(
+                selected = selectedTab == 2,
+                onClick = { selectedTab = 2 },
+                text = { Text("我的号码") }
+            )
+            Tab(
+                selected = selectedTab == 3,
+                onClick = { selectedTab = 3 },
+                text = { Text("快乐8验奖") }
+            )
         }
-        
-        // 根据选中的标签显示不同的内容
-        when (selectedTab) {
-            0 -> NumberInputScreen()
-            1 -> LuckyNumberScreen()
+
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
+            when (selectedTab) {
+                0 -> key("lottery_predict") {
+                    NumberInputScreen(onNavigateToSavedPicks = { selectedTab = 2 })
+                }
+                1 -> key("lottery_lucky") {
+                    LuckyNumberScreen(onNavigateToSavedPicks = { selectedTab = 2 })
+                }
+                2 -> key("lottery_saved") {
+                    SavedPicksScreen()
+                }
+                3 -> key("lottery_kl8") {
+                    Kl8CheckScreen()
+                }
+            }
+        }
+    }
+}
+
+internal val Kl8BallColor = Color(0xFFEF7B77)
+private val Kl8MissBallColor = Color.White
+internal val Kl8ErrorColor = Color(0xFFE74C3C)
+
+internal enum class Kl8BallStyle { Filled, Miss, Win, Hit }
+
+private val Kl8BallSize = 30.dp
+private val Kl8BallSpacing = 6.dp
+
+@Composable
+internal fun Kl8BallFlowRow(
+    numbers: List<Int>,
+    modifier: Modifier = Modifier,
+    style: (Int) -> Kl8BallStyle = { Kl8BallStyle.Filled }
+) {
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        val maxPerRow = ((maxWidth + Kl8BallSpacing) / (Kl8BallSize + Kl8BallSpacing))
+            .toInt()
+            .coerceAtLeast(1)
+        Column(verticalArrangement = Arrangement.spacedBy(Kl8BallSpacing)) {
+            numbers.chunked(maxPerRow).forEach { rowNumbers ->
+                Row(horizontalArrangement = Arrangement.spacedBy(Kl8BallSpacing)) {
+                    rowNumbers.forEach { number ->
+                        Kl8Ball(number, style(number))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun Kl8Ball(number: Int, style: Kl8BallStyle = Kl8BallStyle.Filled) {
+    val modifier = when (style) {
+        Kl8BallStyle.Filled, Kl8BallStyle.Win, Kl8BallStyle.Hit -> Modifier
+            .size(30.dp)
+            .background(Kl8BallColor, CircleShape)
+        Kl8BallStyle.Miss -> Modifier
+            .size(30.dp)
+            .background(Kl8MissBallColor, CircleShape)
+            .border(1.dp, Kl8BallColor, CircleShape)
+    }
+    val textColor = when (style) {
+        Kl8BallStyle.Filled, Kl8BallStyle.Win, Kl8BallStyle.Hit -> Color.White
+        Kl8BallStyle.Miss -> Kl8BallColor
+    }
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "%02d".format(number),
+            fontSize = 13.sp,
+            color = textColor,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+private fun LazyListScope.kl8Pick10ResultItems(tickets: List<List<Int>>) {
+    val groupSize = 5
+    val pricePerTicket = 2
+    val groups = tickets.chunked(groupSize)
+
+    item(key = "kl8-predict-header") {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+        ) {
+            Text(
+                text = "金额：${tickets.size * pricePerTicket} 元 [1倍]",
+                fontSize = 14.sp,
+                color = Color(0xFF666666)
+            )
+            Text(
+                text = "快乐8 选十 · 共${tickets.size}注 · 5注一组",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+        }
+    }
+
+    groups.forEachIndexed { groupIndex, groupTickets ->
+        item(key = "kl8-predict-group-$groupIndex") {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFFF8F8F8))
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = "第${groupIndex + 1}组 · ${groupTickets.size}注",
+                            fontSize = 13.sp,
+                            color = Color(0xFF888888)
+                        )
+                    }
+                    groupTickets.forEachIndexed { ticketIndex, numbers ->
+                        Kl8BallFlowRow(
+                            numbers = numbers.sorted(),
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
+                        )
+                        if (ticketIndex < groupTickets.lastIndex) {
+                            Divider(color = Color(0xFFEEEEEE))
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NumberInputScreen() {
-    var numbers by remember { mutableStateOf(List(7) { "" }) }
-    var selectedLottery by remember { mutableStateOf("双色球") }
-    var predictions by remember { mutableStateOf<List<LotteryPrediction>>(emptyList()) }
-    var showPredictions by remember { mutableStateOf(false) }
-    
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Text(
-            text = "彩票号码预测器",
-            fontSize = 20.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-        
-        // 彩票类型选择
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant
-            )
-        ) {
-            Column(
-                modifier = Modifier.padding(8.dp)
-            ) {
-                Text(
-                    text = "选择彩票类型：",
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(bottom = 4.dp)
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = selectedLottery == "双色球",
-                            onClick = { 
-                                selectedLottery = "双色球"
-                                // 清空预测结果和输入框
-                                predictions = emptyList()
-                                showPredictions = false
-                                numbers = List(7) { "" }
-                            }
-                        )
-                        Text(
-                            text = "双色球",
-                            modifier = Modifier.padding(start = 8.dp)
-                        )
-                    }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = selectedLottery == "大乐透",
-                            onClick = { 
-                                selectedLottery = "大乐透"
-                                // 清空预测结果和输入框
-                                predictions = emptyList()
-                                showPredictions = false
-                                numbers = List(7) { "" }
-                            }
-                        )
-                        Text(
-                            text = "大乐透",
-                            modifier = Modifier.padding(start = 8.dp)
-                        )
-                    }
-                }
-            }
+fun Kl8CheckScreen() {
+    var winningInput by remember { mutableStateOf("") }
+    var ticketsInput by remember { mutableStateOf("") }
+    var float10Input by remember { mutableStateOf("") }
+    var issueCode by remember { mutableStateOf("") }
+    var apiCheckResult by remember { mutableStateOf<PickCheckResponse?>(null) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var statusMessage by remember { mutableStateOf<String?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
+    var isChecking by remember { mutableStateOf(false) }
+    var isSaving by remember { mutableStateOf(false) }
+    var isLoadingSaved by remember { mutableStateOf(false) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var lastDraw by remember { mutableStateOf<KL8LastDrawResponse?>(null) }
+    var savedTicketsKey by remember { mutableStateOf<String?>(null) }
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+    val lastDrawnCode = lastDraw?.code
+    val canCheckIssue = LotteryPicksHelper.canCheckIssue(issueCode, lastDrawnCode)
+    val checkBlockedReason = LotteryPicksHelper.checkUnavailableReason(issueCode, lastDrawnCode)
+    val ticketsContentKey = remember(ticketsInput) {
+        LotteryPicksHelper.contentKeyFromKl8Tickets(Kl8PrizeChecker.parseTickets(ticketsInput))
+    }
+    val alreadySavedTickets = savedTicketsKey == ticketsContentKey && ticketsContentKey.isNotBlank()
+
+    LaunchedEffect(ticketsContentKey) {
+        apiCheckResult = null
+    }
+
+    LaunchedEffect(Unit) {
+        try {
+            isLoading = true
+            loadError = null
+            val draw = RetrofitClient.apiService.getKL8LastDraw()
+            lastDraw = draw
+            issueCode = draw.code
+            winningInput = Kl8PrizeChecker.formatNumbers(draw.numbers)
+            isLoading = false
+        } catch (e: Exception) {
+            isLoading = false
+            loadError = "加载最新开奖失败: ${LotteryPicksHelper.parseApiError(e)}"
         }
-        
-        // 动态输入框 - 根据彩票类型调整数量
-        val inputCount = if (selectedLottery == "双色球") 6 else 5
-        Text(
-            text = "请输入${if (selectedLottery == "双色球") "6个" else "5个"}号码",
-            fontSize = 14.sp,
-            modifier = Modifier.padding(bottom = 4.dp)
-        )
-        
-        if (selectedLottery == "双色球") {
-            // 双色球：两行显示，每行3个
-            Column(
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                // 第一行：前3个输入框
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    numbers.take(3).forEachIndexed { index, value ->
-                        OutlinedTextField(
-                            value = value,
-                            onValueChange = { newValue ->
-                                if (newValue.length <= 2 && newValue.all { it.isDigit() }) {
-                                    numbers = numbers.toMutableList().apply {
-                                        this[index] = newValue
-                                    }
-                                }
-                            },
-                            label = { Text("${index + 1}") },
-                            placeholder = { Text("00") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier
-                                .width(90.dp)
-                                .height(60.dp),
-                            singleLine = true,
-                            textStyle = MaterialTheme.typography.bodyLarge.copy(
-                                textAlign = TextAlign.Center
-                            )
+    }
+
+    LaunchedEffect(apiCheckResult, errorMessage) {
+        if (apiCheckResult != null) {
+            listState.animateScrollToItem(maxOf(0, listState.layoutInfo.totalItemsCount - 1))
+        }
+    }
+
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item(key = "status") {
+            when {
+                isLoading -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        Text(
+                            "正在加载最新开奖...",
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(start = 8.dp)
                         )
                     }
                 }
-                
-                // 第二行：后3个输入框
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    numbers.drop(3).take(3).forEachIndexed { index, value ->
-                        OutlinedTextField(
-                            value = value,
-                            onValueChange = { newValue ->
-                                if (newValue.length <= 2 && newValue.all { it.isDigit() }) {
-                                    numbers = numbers.toMutableList().apply {
-                                        this[index + 3] = newValue
-                                    }
-                                }
-                            },
-                            label = { Text("${index + 4}") },
-                            placeholder = { Text("00") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier
-                                .width(90.dp)
-                                .height(60.dp),
-                            singleLine = true,
-                            textStyle = MaterialTheme.typography.bodyLarge.copy(
-                                textAlign = TextAlign.Center
-                            )
-                        )
-                    }
+                loadError != null -> {
+                    Text(loadError!!, fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
                 }
-            }
-        } else {
-            // 大乐透：一行显示5个
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                numbers.take(inputCount).forEachIndexed { index, value ->
-                    OutlinedTextField(
-                        value = value,
-                        onValueChange = { newValue ->
-                            if (newValue.length <= 2 && newValue.all { it.isDigit() }) {
-                                numbers = numbers.toMutableList().apply {
-                                    this[index] = newValue
-                                }
-                            }
-                        },
-                        label = { Text("${index + 1}") },
-                        placeholder = { Text("00") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier
-                            .width(70.dp)
-                            .height(60.dp),
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(
-                            textAlign = TextAlign.Center
-                        )
+                lastDraw != null -> {
+                    Text(
+                        text = "最新开奖 · 期号 ${lastDraw!!.code} · ${formatIssueDate(lastDraw!!.issueDate)}",
+                        fontSize = 12.sp,
+                        color = Color(0xFF666666)
                     )
                 }
             }
         }
-        
-        // 预测按钮
-        Button(
-            onClick = {
-                try {
-                    val inputNumbers = numbers.filter { it.isNotEmpty() }.map { it.toInt() }
-                    predictions = if (selectedLottery == "双色球") {
-                        if (inputNumbers.size == 6) {
-                            LotteryPredictor.processDoubleColorBall(inputNumbers)
-                        } else {
-                            emptyList()
-                        }
-                    } else {
-                        if (inputNumbers.size == 5) {
-                            LotteryPredictor.processDaLeTou(inputNumbers)
-                        } else {
-                            emptyList()
-                        }
-                    }
-                    showPredictions = true
-                } catch (e: Exception) {
-                    // 处理错误
-                    predictions = emptyList()
-                    showPredictions = false
+
+        item(key = "issue-code") {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(text = "兑奖期号", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    text = "仅已开奖期号可兑奖，最新已开 ${lastDrawnCode ?: "—"}",
+                    fontSize = 12.sp,
+                    color = Color(0xFF999999)
+                )
+                OutlinedTextField(
+                    value = issueCode,
+                    onValueChange = { issueCode = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    enabled = !isLoading,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Kl8BallColor,
+                        cursorColor = Kl8BallColor
+                    )
+                )
+                if (!canCheckIssue && checkBlockedReason != null) {
+                    Text(
+                        text = checkBlockedReason,
+                        fontSize = 12.sp,
+                        color = Color(0xFFEF7B77)
+                    )
                 }
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(40.dp),
-            enabled = {
-                val requiredCount = if (selectedLottery == "双色球") 6 else 5
-                val filledCount = numbers.take(requiredCount).count { it.isNotEmpty() }
-                filledCount == requiredCount
-            }()
-        ) {
-            Text("生成预测号码", fontSize = 14.sp)
+            }
         }
-        
-        // 显示输入的数字
-        if (numbers.any { it.isNotEmpty() }) {
+
+        item(key = "winning-input") {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(text = "彩果", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    text = "20 个开奖号码，空格或逗号分隔",
+                    fontSize = 12.sp,
+                    color = Color(0xFF999999)
+                )
+                OutlinedTextField(
+                    value = winningInput,
+                    onValueChange = { winningInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    maxLines = 3,
+                    enabled = !isLoading,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Kl8BallColor,
+                        cursorColor = Kl8BallColor
+                    )
+                )
+            }
+        }
+
+        item(key = "tickets-input") {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(text = "购买号码", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    text = "每行一注，每注 10 个号码",
+                    fontSize = 12.sp,
+                    color = Color(0xFF999999)
+                )
+                OutlinedTextField(
+                    value = ticketsInput,
+                    onValueChange = { ticketsInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 5,
+                    maxLines = 10,
+                    placeholder = { Text("04 13 20 21 22 39 44 63 65 79", fontSize = 13.sp) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Kl8BallColor,
+                        cursorColor = Kl8BallColor
+                    )
+                )
+            }
+        }
+
+        item(key = "float-input") {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(text = "选十浮动奖金", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    text = "有中10时填写当期单注奖金，元",
+                    fontSize = 12.sp,
+                    color = Color(0xFF999999)
+                )
+                OutlinedTextField(
+                    value = float10Input,
+                    onValueChange = { float10Input = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    placeholder = { Text("未中10可留空", fontSize = 13.sp) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Kl8BallColor,
+                        cursorColor = Kl8BallColor
+                    )
+                )
+            }
+        }
+
+        item(key = "action-buttons") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            if (issueCode.isBlank()) {
+                                errorMessage = "请先填写兑奖期号"
+                                return@OutlinedButton
+                            }
+                            coroutineScope.launch {
+                                try {
+                                    isLoadingSaved = true
+                                    errorMessage = null
+                                    statusMessage = null
+                                    val response = RetrofitClient.apiService.getPicks(
+                                        lotteryType = "kl8",
+                                        issueCode = issueCode
+                                    )
+                                    ticketsInput = LotteryPicksHelper.picksToKl8TicketsText(response.picks)
+                                    statusMessage = "已加载 ${response.count} 注"
+                                    isLoadingSaved = false
+                                } catch (e: Exception) {
+                                    isLoadingSaved = false
+                                    errorMessage = "加载已保存号码失败: ${LotteryPicksHelper.parseApiError(e)}"
+                                }
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        enabled = !isLoading && !isLoadingSaved
+                    ) {
+                        Text(if (isLoadingSaved) "加载中" else "从已保存加载", fontSize = 13.sp)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            val tickets = Kl8PrizeChecker.parseTickets(ticketsInput)
+                            val errors = Kl8PrizeChecker.validate(
+                                Kl8PrizeChecker.parseNumbers(winningInput),
+                                tickets
+                            ).filterNot { it.startsWith("彩果") }
+                            if (issueCode.isBlank()) {
+                                errorMessage = "请先填写兑奖期号"
+                                return@OutlinedButton
+                            }
+                            if (errors.isNotEmpty()) {
+                                errorMessage = errors.joinToString("；")
+                                return@OutlinedButton
+                            }
+                            if (alreadySavedTickets) {
+                                errorMessage = "本批号码已保存，请修改号码后再保存"
+                                return@OutlinedButton
+                            }
+                            coroutineScope.launch {
+                                try {
+                                    isSaving = true
+                                    errorMessage = null
+                                    statusMessage = null
+                                    RetrofitClient.apiService.savePicks(
+                                        SavePicksRequest(
+                                            lotteryType = "kl8",
+                                            issueCode = issueCode,
+                                            source = "generate",
+                                            picks = LotteryPicksHelper.buildKl8Picks(tickets)
+                                        )
+                                    )
+                                    savedTicketsKey = ticketsContentKey
+                                    statusMessage = "已保存 ${tickets.size} 注"
+                                    isSaving = false
+                                } catch (e: Exception) {
+                                    isSaving = false
+                                    errorMessage = "保存失败: ${LotteryPicksHelper.parseApiError(e)}"
+                                }
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        enabled = !isLoading && !isSaving && !alreadySavedTickets
+                    ) {
+                        Text(
+                            when {
+                                isSaving -> "保存中"
+                                alreadySavedTickets -> "已保存"
+                                else -> "保存本批"
+                            },
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+
+                Button(
+                    onClick = {
+                        errorMessage = null
+                        statusMessage = null
+                        apiCheckResult = null
+
+                        if (issueCode.isBlank()) {
+                            errorMessage = "请先填写兑奖期号"
+                            return@Button
+                        }
+                        if (!canCheckIssue) {
+                            errorMessage = checkBlockedReason ?: "该期尚未开奖，无法兑奖"
+                            return@Button
+                        }
+
+                        val float10Amount = Kl8PrizeChecker.parseFloat10Input(float10Input)
+                        if (float10Amount == Int.MIN_VALUE) {
+                            errorMessage = "选十浮动奖金请输入有效数字"
+                            return@Button
+                        }
+
+                        coroutineScope.launch {
+                            try {
+                                isChecking = true
+                                val tickets = Kl8PrizeChecker.parseTickets(ticketsInput)
+                                if (tickets.isNotEmpty()) {
+                                    val ticketErrors = Kl8PrizeChecker.validate(
+                                        Kl8PrizeChecker.parseNumbers(winningInput),
+                                        tickets
+                                    ).filterNot { it.startsWith("彩果") }
+                                    if (ticketErrors.isNotEmpty()) {
+                                        errorMessage = ticketErrors.joinToString("；")
+                                        isChecking = false
+                                        return@launch
+                                    }
+                                    if (!alreadySavedTickets) {
+                                        RetrofitClient.apiService.savePicks(
+                                            SavePicksRequest(
+                                                lotteryType = "kl8",
+                                                issueCode = issueCode,
+                                                source = "generate",
+                                                picks = LotteryPicksHelper.buildKl8Picks(tickets)
+                                            )
+                                        )
+                                        savedTicketsKey = ticketsContentKey
+                                    }
+                                }
+
+                                val response = RetrofitClient.apiService.checkPicks(
+                                    lotteryType = "kl8",
+                                    issueCode = issueCode
+                                )
+                                apiCheckResult = response
+                                isChecking = false
+                            } catch (e: Exception) {
+                                isChecking = false
+                                errorMessage = "对号失败: ${LotteryPicksHelper.parseApiError(e)}"
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp),
+                    enabled = !isLoading && !isChecking && canCheckIssue,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Kl8BallColor,
+                        disabledContainerColor = Color(0xFFCCCCCC)
+                    )
+                ) {
+                    Text(
+                        when {
+                            isChecking -> "对号中..."
+                            !canCheckIssue -> "待开奖"
+                            else -> "对号（API）"
+                        },
+                        fontSize = 15.sp
+                    )
+                }
+            }
+        }
+
+        statusMessage?.let { message ->
+            item(key = "status-message") {
+                Text(
+                    text = message,
+                    fontSize = 13.sp,
+                    color = Color(0xFF2E7D32)
+                )
+            }
+        }
+
+        errorMessage?.let { message ->
+            item(key = "error") {
+                Text(
+                    text = message,
+                    fontSize = 13.sp,
+                    color = Kl8ErrorColor,
+                    lineHeight = 18.sp
+                )
+            }
+        }
+
+        apiCheckResult?.let { response ->
+            val float10Amount = Kl8PrizeChecker.parseFloat10Input(float10Input)
+            pickCheckResultItems(response, float10Amount)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun NumberInputScreen(onNavigateToSavedPicks: () -> Unit = {}) {
+    var selectedLottery by remember { mutableStateOf("双色球") }
+    var predictions by remember { mutableStateOf<List<LotteryPrediction>>(emptyList()) }
+    var kl8Predictions by remember { mutableStateOf<List<List<Int>>>(emptyList()) }
+    var showPredictions by remember { mutableStateOf(false) }
+    var showKl8Predictions by remember { mutableStateOf(false) }
+    var ssqLastDraw by remember { mutableStateOf<SSQLastDrawResponse?>(null) }
+    var dltLastDraw by remember { mutableStateOf<DLTLastDrawResponse?>(null) }
+    var kl8LastDraw by remember { mutableStateOf<KL8LastDrawResponse?>(null) }
+    var targetIssueCode by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    val isKl8 = selectedLottery == "快乐8"
+
+    LaunchedEffect(selectedLottery) {
+        predictions = emptyList()
+        kl8Predictions = emptyList()
+        showPredictions = false
+        showKl8Predictions = false
+        if (isKl8) {
+            ssqLastDraw = null
+            dltLastDraw = null
+            errorMessage = null
+            isLoading = true
+            try {
+                kl8LastDraw = RetrofitClient.apiService.getKL8LastDraw()
+                targetIssueCode = LotteryPicksHelper.nextIssueCode(kl8LastDraw!!.code)
+                isLoading = false
+            } catch (e: Exception) {
+                isLoading = false
+                errorMessage = "加载快乐8期号失败: ${e.message}"
+                kl8LastDraw = null
+            }
+            return@LaunchedEffect
+        }
+        kl8LastDraw = null
+        try {
+            isLoading = true
+            errorMessage = null
+            if (selectedLottery == "双色球") {
+                dltLastDraw = null
+                ssqLastDraw = RetrofitClient.apiService.getSSQLastDraw()
+                targetIssueCode = LotteryPicksHelper.nextIssueCode(ssqLastDraw!!.code)
+            } else {
+                ssqLastDraw = null
+                dltLastDraw = RetrofitClient.apiService.getDLTLastDraw()
+                targetIssueCode = LotteryPicksHelper.nextIssueCode(dltLastDraw!!.code)
+            }
+            isLoading = false
+        } catch (e: Exception) {
+            isLoading = false
+            errorMessage = "加载上期号码失败: ${e.message}"
+            ssqLastDraw = null
+            dltLastDraw = null
+        }
+    }
+
+    val frontNumbers = when (selectedLottery) {
+        "双色球" -> ssqLastDraw?.frontNumbers
+        "大乐透" -> dltLastDraw?.frontNumbers
+        else -> null
+    }
+    val lastDrawCode = when (selectedLottery) {
+        "双色球" -> ssqLastDraw?.code
+        "大乐透" -> dltLastDraw?.code
+        else -> null
+    }
+    val lastDrawDate = when (selectedLottery) {
+        "双色球" -> ssqLastDraw?.issueDate
+        "大乐透" -> dltLastDraw?.issueDate
+        else -> null
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        item(key = "title") {
+            Text(
+                text = "彩票号码预测器",
+                fontSize = 20.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 4.dp)
+            )
+        }
+
+        item(key = "lottery-type") {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant
                 )
             ) {
-                Column(
-                    modifier = Modifier.padding(8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
+                Column(modifier = Modifier.padding(8.dp)) {
                     Text(
-                        text = "已选择：$selectedLottery",
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(bottom = 4.dp)
-                    )
-                    Text(
-                        text = "已输入的数字：",
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(bottom = 4.dp)
-                    )
-                    Text(
-                        text = numbers.filter { it.isNotEmpty() }.joinToString("  "),
+                        text = "选择彩票类型：",
                         fontSize = 14.sp,
-                        textAlign = TextAlign.Center
+                        modifier = Modifier.padding(bottom = 4.dp)
                     )
+                    listOf("双色球", "大乐透", "快乐8").forEach { lotteryType ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = selectedLottery == lotteryType,
+                                onClick = { selectedLottery = lotteryType }
+                            )
+                            Text(
+                                text = lotteryType,
+                                modifier = Modifier.padding(start = 8.dp)
+                            )
+                        }
+                    }
                 }
             }
         }
-        
-        // 显示预测结果
-        if (showPredictions && predictions.isNotEmpty()) {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth(), // 只用fillMaxWidth，高度自适应
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
-            ) {
-                Column(
-                    modifier = Modifier.padding(8.dp)
-                ) {
-                    Text(
-                        text = "预测号码：",
-                        fontSize = 14.sp,
-                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 8.dp)
+
+        item(key = "last-draw") {
+            if (!isKl8) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
                     )
-                    
-                    // 使用Column显示所有预测结果
+                ) {
                     Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                        modifier = Modifier.padding(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        predictions.forEachIndexed { index, prediction ->
-                            val groupNames = if (selectedLottery == "双色球") {
-                                listOf("第1组", "第2组", "第3组", "第4组", "第5组")
-                            } else {
-                                listOf("第1组", "第2组", "第3组", "第4组", "第5组", "第6组")
+                        Text(
+                            text = "上期开奖号码",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+
+                        when {
+                            isLoading -> {
+                                CircularProgressIndicator(modifier = Modifier.size(32.dp))
+                                Text("正在加载...", fontSize = 12.sp)
                             }
-                            val groupName = if (index < groupNames.size) groupNames[index] else "第${index + 1}组"
-                            
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 1.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surface
+                            errorMessage != null -> {
+                                Text(
+                                    text = errorMessage!!,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.error,
+                                    textAlign = TextAlign.Center
                                 )
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(4.dp)
-                                ) {
+                            }
+                            frontNumbers != null -> {
+                                if (lastDrawCode != null) {
                                     Text(
-                                        text = groupName,
+                                        text = "期号：$lastDrawCode",
                                         fontSize = 12.sp,
-                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-                                        modifier = Modifier.padding(bottom = 2.dp)
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
-                                    
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.Start
-                                    ) {
-                                        // 显示红球
-                                        val redBallCount = if (selectedLottery == "双色球") 6 else 5
-                                        prediction.redBalls.take(redBallCount).forEach { ball ->
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(20.dp)
-                                                    .padding(horizontal = 1.dp)
-                                                    .background(
-                                                        color = MaterialTheme.colorScheme.error,
-                                                        shape = CircleShape
-                                                    ),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    text = ball.toString(),
-                                                    fontSize = 8.sp,
-                                                    color = MaterialTheme.colorScheme.onError
-                                                )
-                                            }
+                                }
+                                if (lastDrawDate != null) {
+                                    Text(
+                                        text = "开奖日期：${formatIssueDate(lastDrawDate)}",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    frontNumbers.forEach { number ->
+                                        Box(
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .background(
+                                                    color = MaterialTheme.colorScheme.error,
+                                                    shape = CircleShape
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = number.toString(),
+                                                fontSize = 14.sp,
+                                                color = MaterialTheme.colorScheme.onError,
+                                                fontWeight = FontWeight.Bold
+                                            )
                                         }
-                                        
-                                        Text(
-                                            text = " + ",
-                                            fontSize = 10.sp,
-                                            modifier = Modifier.padding(horizontal = 2.dp)
-                                        )
-                                        
-                                        // 显示蓝球
-                                        if (selectedLottery == "双色球") {
-                                            // 双色球：显示1个蓝球
+                                    }
+
+                                    if (selectedLottery == "双色球" && ssqLastDraw != null) {
+                                        Text(text = "+", fontSize = 14.sp)
+                                        Box(
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .background(
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    shape = CircleShape
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = ssqLastDraw!!.backNumber.toString(),
+                                                fontSize = 14.sp,
+                                                color = MaterialTheme.colorScheme.onPrimary,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+
+                                    if (selectedLottery == "大乐透" && dltLastDraw != null) {
+                                        Text(text = "+", fontSize = 14.sp)
+                                        dltLastDraw!!.backNumbers.forEach { number ->
                                             Box(
                                                 modifier = Modifier
-                                                    .size(20.dp)
+                                                    .size(36.dp)
                                                     .background(
                                                         color = MaterialTheme.colorScheme.primary,
                                                         shape = CircleShape
@@ -1645,21 +2078,140 @@ fun NumberInputScreen() {
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Text(
-                                                    text = prediction.blueBall.toString(),
-                                                    fontSize = 8.sp,
-                                                    color = MaterialTheme.colorScheme.onPrimary
+                                                    text = number.toString(),
+                                                    fontSize = 14.sp,
+                                                    color = MaterialTheme.colorScheme.onPrimary,
+                                                    fontWeight = FontWeight.Bold
                                                 )
                                             }
-                                        } else {
-                                            // 大乐透：显示2个蓝球
-                                            val blueBallCount = 2
-                                            prediction.redBalls.drop(redBallCount).take(blueBallCount).forEach { ball ->
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "快乐8 选十",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = "1-80 号码矩阵选号，共 16 注，每注 10 个号码",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(top = 6.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        item(key = "generate-btn") {
+            Button(
+                onClick = {
+                    try {
+                        if (isKl8) {
+                            kl8Predictions = LotteryPredictor.generateKl8Pick10Matrix()
+                            showKl8Predictions = true
+                            showPredictions = false
+                        } else {
+                            val inputNumbers = frontNumbers ?: return@Button
+                            predictions = if (selectedLottery == "双色球") {
+                                LotteryPredictor.processDoubleColorBall(inputNumbers)
+                            } else {
+                                LotteryPredictor.processDaLeTou(inputNumbers)
+                            }
+                            showPredictions = true
+                            showKl8Predictions = false
+                        }
+                    } catch (e: Exception) {
+                        predictions = emptyList()
+                        kl8Predictions = emptyList()
+                        showPredictions = false
+                        showKl8Predictions = false
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(40.dp),
+                enabled = isKl8 || (!isLoading && frontNumbers != null),
+                colors = if (isKl8) {
+                    ButtonDefaults.buttonColors(containerColor = Kl8BallColor)
+                } else {
+                    ButtonDefaults.buttonColors()
+                }
+            ) {
+                Text("生成预测号码", fontSize = 14.sp)
+            }
+        }
+
+        if (!isKl8 && showPredictions && predictions.isNotEmpty()) {
+            item(key = "ssq-dlt-predictions") {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(8.dp)) {
+                        Text(
+                            text = "预测号码：",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            predictions.forEachIndexed { index, prediction ->
+                                val groupNames = if (selectedLottery == "双色球") {
+                                    listOf("第1组", "第2组", "第3组", "第4组", "第5组")
+                                } else {
+                                    listOf("第1组", "第2组", "第3组", "第4组", "第5组", "第6组")
+                                }
+                                val groupName = if (index < groupNames.size) groupNames[index] else "第${index + 1}组"
+
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 1.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surface
+                                    )
+                                ) {
+                                    Column(modifier = Modifier.padding(4.dp)) {
+                                        Text(
+                                            text = groupName,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            modifier = Modifier.padding(bottom = 2.dp)
+                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.Start
+                                        ) {
+                                            val redBallCount = if (selectedLottery == "双色球") 6 else 5
+                                            prediction.redBalls.take(redBallCount).forEach { ball ->
                                                 Box(
                                                     modifier = Modifier
                                                         .size(20.dp)
                                                         .padding(horizontal = 1.dp)
                                                         .background(
-                                                            color = MaterialTheme.colorScheme.primary,
+                                                            color = MaterialTheme.colorScheme.error,
                                                             shape = CircleShape
                                                         ),
                                                     contentAlignment = Alignment.Center
@@ -1667,8 +2219,50 @@ fun NumberInputScreen() {
                                                     Text(
                                                         text = ball.toString(),
                                                         fontSize = 8.sp,
+                                                        color = MaterialTheme.colorScheme.onError
+                                                    )
+                                                }
+                                            }
+                                            Text(
+                                                text = " + ",
+                                                fontSize = 10.sp,
+                                                modifier = Modifier.padding(horizontal = 2.dp)
+                                            )
+                                            if (selectedLottery == "双色球") {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(20.dp)
+                                                        .background(
+                                                            color = MaterialTheme.colorScheme.primary,
+                                                            shape = CircleShape
+                                                        ),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        text = prediction.blueBall.toString(),
+                                                        fontSize = 8.sp,
                                                         color = MaterialTheme.colorScheme.onPrimary
                                                     )
+                                                }
+                                            } else {
+                                                val blueBallCount = 2
+                                                prediction.redBalls.drop(redBallCount).take(blueBallCount).forEach { ball ->
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(20.dp)
+                                                            .padding(horizontal = 1.dp)
+                                                            .background(
+                                                                color = MaterialTheme.colorScheme.primary,
+                                                                shape = CircleShape
+                                                            ),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Text(
+                                                            text = ball.toString(),
+                                                            fontSize = 8.sp,
+                                                            color = MaterialTheme.colorScheme.onPrimary
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
@@ -1678,6 +2272,57 @@ fun NumberInputScreen() {
                         }
                     }
                 }
+            }
+
+            item(key = "save-ssq-dlt-predictions") {
+                val pickItems = if (selectedLottery == "双色球") {
+                    LotteryPicksHelper.buildSsqPicksFromPredictions(predictions)
+                } else {
+                    LotteryPicksHelper.buildDltPicksFromPredictions(predictions)
+                }
+                SavePicksBar(
+                    contentKey = LotteryPicksHelper.contentKey(pickItems),
+                    issueCode = targetIssueCode,
+                    pickCount = pickItems.size,
+                    onIssueCodeChange = { targetIssueCode = it },
+                    onSave = {
+                        RetrofitClient.apiService.savePicks(
+                            SavePicksRequest(
+                                lotteryType = LotteryPicksHelper.lotteryTypeCode(selectedLottery),
+                                issueCode = targetIssueCode,
+                                source = "generate",
+                                picks = pickItems
+                            )
+                        )
+                    },
+                    onSaved = onNavigateToSavedPicks
+                )
+            }
+        }
+
+        if (isKl8 && showKl8Predictions && kl8Predictions.isNotEmpty()) {
+            kl8Pick10ResultItems(kl8Predictions)
+
+            item(key = "save-kl8-predictions") {
+                val pickItems = LotteryPicksHelper.buildKl8Picks(kl8Predictions)
+                SavePicksBar(
+                    contentKey = LotteryPicksHelper.contentKey(pickItems),
+                    issueCode = targetIssueCode,
+                    pickCount = pickItems.size,
+                    onIssueCodeChange = { targetIssueCode = it },
+                    onSave = {
+                        RetrofitClient.apiService.savePicks(
+                            SavePicksRequest(
+                                lotteryType = "kl8",
+                                issueCode = targetIssueCode,
+                                source = "generate",
+                                picks = pickItems
+                            )
+                        )
+                    },
+                    onSaved = onNavigateToSavedPicks,
+                    buttonColor = Kl8BallColor
+                )
             }
         }
     }
@@ -1794,14 +2439,31 @@ fun DateTimePickerDialog(
 // 幸运选号界面
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LuckyNumberScreen() {
+fun LuckyNumberScreen(onNavigateToSavedPicks: () -> Unit = {}) {
     var ssqResults by remember { mutableStateOf<SSQResponse?>(null) }
     var dltResults by remember { mutableStateOf<DLTResponse?>(null) }
+    var ssqLastDraw by remember { mutableStateOf<SSQLastDrawResponse?>(null) }
+    var dltLastDraw by remember { mutableStateOf<DLTLastDrawResponse?>(null) }
+    var ssqIssueCode by remember { mutableStateOf("") }
+    var dltIssueCode by remember { mutableStateOf("") }
     var isLoadingSSQ by remember { mutableStateOf(false) }
     var isLoadingDLT by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     val coroutineScope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
+
+    LaunchedEffect(Unit) {
+        try {
+            ssqLastDraw = RetrofitClient.apiService.getSSQLastDraw()
+            ssqIssueCode = LotteryPicksHelper.nextIssueCode(ssqLastDraw!!.code)
+        } catch (_: Exception) {
+        }
+        try {
+            dltLastDraw = RetrofitClient.apiService.getDLTLastDraw()
+            dltIssueCode = LotteryPicksHelper.nextIssueCode(dltLastDraw!!.code)
+        } catch (_: Exception) {
+        }
+    }
     
     Column(
         modifier = Modifier
@@ -1910,11 +2572,47 @@ fun LuckyNumberScreen() {
         
         // 显示结果
         if (ssqResults != null) {
+            val ssqPickItems = LotteryPicksHelper.buildSsqPicks(ssqResults!!.results)
             SSQResultsDisplay(ssqResults!!)
+            SavePicksBar(
+                contentKey = LotteryPicksHelper.contentKey(ssqPickItems),
+                issueCode = ssqIssueCode,
+                pickCount = ssqResults!!.results.size,
+                onIssueCodeChange = { ssqIssueCode = it },
+                onSave = {
+                    RetrofitClient.apiService.savePicks(
+                        SavePicksRequest(
+                            lotteryType = "ssq",
+                            issueCode = ssqIssueCode,
+                            source = "generate",
+                            picks = ssqPickItems
+                        )
+                    )
+                },
+                onSaved = onNavigateToSavedPicks
+            )
         }
-        
+
         if (dltResults != null) {
+            val dltPickItems = LotteryPicksHelper.buildDltPicks(dltResults!!.results)
             DLTResultsDisplay(dltResults!!)
+            SavePicksBar(
+                contentKey = LotteryPicksHelper.contentKey(dltPickItems),
+                issueCode = dltIssueCode,
+                pickCount = dltResults!!.results.size,
+                onIssueCodeChange = { dltIssueCode = it },
+                onSave = {
+                    RetrofitClient.apiService.savePicks(
+                        SavePicksRequest(
+                            lotteryType = "dlt",
+                            issueCode = dltIssueCode,
+                            source = "generate",
+                            picks = dltPickItems
+                        )
+                    )
+                },
+                onSaved = onNavigateToSavedPicks
+            )
         }
     }
 }

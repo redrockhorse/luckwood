@@ -208,3 +208,210 @@ data class DLTResponse(
     val results: List<DLTResult>
 )
 
+// 最新一期开奖 - 双色球
+data class SSQLastDrawResponse(
+    @SerializedName("lottery_type")
+    val lotteryType: String,
+    @SerializedName("code")
+    val code: String,
+    @SerializedName("issue_date")
+    val issueDate: String,
+    @SerializedName("front_numbers")
+    val frontNumbers: List<Int>,
+    @SerializedName("back_number")
+    val backNumber: Int
+)
+
+// 最新一期开奖 - 大乐透
+data class DLTLastDrawResponse(
+    @SerializedName("lottery_type")
+    val lotteryType: String,
+    @SerializedName("code")
+    val code: String,
+    @SerializedName("issue_date")
+    val issueDate: String,
+    @SerializedName("front_numbers")
+    val frontNumbers: List<Int>,
+    @SerializedName("back_numbers")
+    val backNumbers: List<Int>
+)
+
+// 最新一期开奖 - 快乐8
+data class KL8LastDrawResponse(
+    @SerializedName("lottery_type")
+    val lotteryType: String,
+    @SerializedName("code")
+    val code: String,
+    @SerializedName("issue_date")
+    val issueDate: String,
+    @SerializedName("numbers")
+    val numbers: List<Int>,
+    @SerializedName("numbers_ordered")
+    val numbersOrdered: List<Int>? = null
+)
+
+// --- 保存号码 ---
+
+data class PickItemRequest(
+    @SerializedName("front_numbers")
+    val frontNumbers: List<Int>? = null,
+    @SerializedName("back_numbers")
+    val backNumbers: List<Int>? = null,
+    @SerializedName("numbers")
+    val numbers: List<Int>? = null,
+    @SerializedName("play_type")
+    val playType: Int? = null,
+    @SerializedName("bet_amount")
+    val betAmount: Double? = null,
+    @SerializedName("multiplier")
+    val multiplier: Int? = null
+)
+
+data class SavePicksRequest(
+    @SerializedName("lottery_type")
+    val lotteryType: String,
+    @SerializedName("issue_code")
+    val issueCode: String,
+    @SerializedName("source")
+    val source: String = "generate",
+    @SerializedName("picks")
+    val picks: List<PickItemRequest>
+)
+
+data class LotteryPick(
+    @SerializedName("id")
+    val id: Int,
+    @SerializedName("lottery_type")
+    val lotteryType: String,
+    @SerializedName("issue_code")
+    val issueCode: String,
+    @SerializedName("front_numbers")
+    val frontNumbers: List<Int>? = null,
+    @SerializedName("back_numbers")
+    val backNumbers: List<Int>? = null,
+    @SerializedName("numbers")
+    val numbers: List<Int>? = null,
+    @SerializedName("play_type")
+    val playType: Int? = null,
+    @SerializedName("bet_amount")
+    val betAmount: Double? = null,
+    @SerializedName("multiplier")
+    val multiplier: Int? = null,
+    @SerializedName("note")
+    val note: String? = null,
+    @SerializedName("source")
+    val source: String? = null,
+    @SerializedName("status")
+    val status: String? = null,
+    @SerializedName("batch_id")
+    val batchId: String? = null,
+    @SerializedName("created_at")
+    val createdAt: String? = null,
+    @SerializedName("updated_at")
+    val updatedAt: String? = null
+)
+
+data class SavePicksResponse(
+    @SerializedName("lottery_type")
+    val lotteryType: String,
+    @SerializedName("issue_code")
+    val issueCode: String,
+    @SerializedName("batch_id")
+    val batchId: String? = null,
+    @SerializedName("count")
+    val count: Int,
+    @SerializedName("picks")
+    val picks: List<LotteryPick>
+)
+
+data class PicksListResponse(
+    @SerializedName("count")
+    val count: Int,
+    @SerializedName("picks")
+    val picks: List<LotteryPick>
+)
+
+data class DeletePickResponse(
+    @SerializedName("message")
+    val message: String,
+    @SerializedName("id")
+    val id: Int
+)
+
+data class PickCheckDraw(
+    @SerializedName("code")
+    val code: String? = null,
+    @SerializedName("issue_date")
+    val issueDate: String? = null,
+    @SerializedName("front_numbers")
+    val frontNumbers: List<Int>? = null,
+    @SerializedName("back_number")
+    val backNumber: Int? = null,
+    @SerializedName("back_numbers")
+    val backNumbers: List<Int>? = null,
+    @SerializedName("numbers")
+    val numbers: List<Int>? = null
+)
+
+data class PickCheckResultItem(
+    @SerializedName("pick_id")
+    val pickId: Int? = null,
+    @SerializedName("front_numbers")
+    val frontNumbers: List<Int>? = null,
+    @SerializedName("back_numbers")
+    val backNumbers: List<Int>? = null,
+    @SerializedName("numbers")
+    val numbers: List<Int>? = null,
+    @SerializedName("front_matched")
+    val frontMatched: List<Int>? = null,
+    @SerializedName("front_match_count")
+    val frontMatchCount: Int? = null,
+    @SerializedName("back_matched")
+    val backMatched: List<Int>? = null,
+    @SerializedName("back_match_count")
+    val backMatchCount: Int? = null,
+    @SerializedName("matched")
+    val matched: List<Int>? = null,
+    @SerializedName("match_count")
+    val matchCount: Int? = null,
+    @SerializedName("back_hit")
+    val backHit: Boolean? = null,
+    @SerializedName("prize_level")
+    val prizeLevel: Int? = null,
+    @SerializedName("prize_name")
+    val prizeName: String? = null,
+    @SerializedName("prize_amount")
+    val prizeAmount: Double? = null,
+    @SerializedName("total_prize")
+    val totalPrize: Double? = null,
+    @SerializedName("bet_amount")
+    val betAmount: Double? = null,
+    @SerializedName("multiplier")
+    val multiplier: Int? = null,
+    @SerializedName("play_type")
+    val playType: Int? = null
+)
+
+data class PickCheckSummary(
+    @SerializedName("total_picks")
+    val totalPicks: Int? = null,
+    @SerializedName("winning_picks")
+    val winningPicks: Int? = null,
+    @SerializedName("total_bet")
+    val totalBet: Double? = null,
+    @SerializedName("total_prize")
+    val totalPrize: Double? = null
+)
+
+data class PickCheckResponse(
+    @SerializedName("lottery_type")
+    val lotteryType: String,
+    @SerializedName("issue_code")
+    val issueCode: String,
+    @SerializedName("draw")
+    val draw: PickCheckDraw,
+    @SerializedName("results")
+    val results: List<PickCheckResultItem>,
+    @SerializedName("summary")
+    val summary: PickCheckSummary? = null
+)

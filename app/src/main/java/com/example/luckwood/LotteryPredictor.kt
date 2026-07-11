@@ -169,4 +169,59 @@ object LotteryPredictor {
         
         return result.take(numCombinations)
     }
+
+    private const val KL8_POOL_MIN = 1
+    private const val KL8_POOL_MAX = 80
+    private const val KL8_PICK_COUNT = 10
+    private const val KL8_GROUP_COUNT = 8
+    private const val KL8_SHUFFLE_TIMES_DEFAULT = 3
+
+    private fun shuffleKl8Pool(shuffleTimes: Int): List<Int> {
+        val pool = (KL8_POOL_MIN..KL8_POOL_MAX).toMutableList()
+        repeat(shuffleTimes) {
+            pool.shuffle()
+        }
+        return pool
+    }
+
+    private fun splitKl8IntoGroups(pool: List<Int>, groupCount: Int, pickCount: Int): List<List<Int>> {
+        val expected = groupCount * pickCount
+        require(pool.size == expected) { "号码池长度应为 $expected，实际为 ${pool.size}" }
+        return (0 until groupCount).map { i ->
+            pool.subList(i * pickCount, (i + 1) * pickCount)
+        }
+    }
+
+    private fun buildKl8MatrixGroups(pool: List<Int>, rows: Int = 8, cols: Int = 10): List<List<Int>> {
+        val expected = rows * cols
+        require(pool.size == expected) { "号码池长度应为 $expected，实际为 ${pool.size}" }
+
+        val matrix = (0 until rows).map { row ->
+            pool.subList(row * cols, (row + 1) * cols)
+        }
+
+        val prefixGroups = (0 until 8).map { col ->
+            (0 until rows).map { row -> matrix[row][col] }
+        }
+
+        val remaining = (0 until rows).flatMap { row ->
+            (8 until cols).map { col -> matrix[row][col] }
+        }.toMutableList()
+        remaining.shuffle()
+
+        return (0 until KL8_GROUP_COUNT).map { i ->
+            prefixGroups[i] + remaining.subList(i * 2, (i + 1) * 2)
+        }
+    }
+
+    /**
+     * 快乐8选十矩阵选号：切分 8 组 + 矩阵法 8 组，共 16 注
+     */
+    fun generateKl8Pick10Matrix(shuffleTimes: Int = KL8_SHUFFLE_TIMES_DEFAULT): List<List<Int>> {
+        require(shuffleTimes > 0) { "打乱次数必须大于 0" }
+        val pool = shuffleKl8Pool(shuffleTimes)
+        val firstBatch = splitKl8IntoGroups(pool, KL8_GROUP_COUNT, KL8_PICK_COUNT)
+        val secondBatch = buildKl8MatrixGroups(pool)
+        return (firstBatch + secondBatch).map { it.sorted() }
+    }
 } 
