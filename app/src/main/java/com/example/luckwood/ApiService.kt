@@ -62,7 +62,8 @@ object RetrofitClient {
     private const val BASE_URL = "http://39.101.76.38:8057/"
     
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
-        level = HttpLoggingInterceptor.Level.BODY
+        // BODY logging can dump huge payloads and amplify main-thread jank under load.
+        level = HttpLoggingInterceptor.Level.BASIC
     }
     
     private val okHttpClient = OkHttpClient.Builder()

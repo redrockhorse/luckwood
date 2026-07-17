@@ -12,15 +12,12 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -50,10 +47,13 @@ import kotlinx.coroutines.launch
 
 // 定义导航路由
 sealed class Screen(val route: String, val title: String) {
-    object Football : Screen("football", "足球")
-    object Lottery : Screen("lottery", "彩票")
+    object Pick : Screen("pick", "选号")
+    object Mine : Screen("mine", "号码本")
+    object More : Screen("more", "更多")
+    object ManualCheck : Screen("manual_check", "手动对号")
+    object Football : Screen("football", "足球分析")
     object FootballMatchList : Screen("football_match_list/{startDate}/{startHour}/{endDate}/{endHour}", "比赛列表") {
-        fun createRoute(startDate: String, startHour: Int, endDate: String, endHour: Int) = 
+        fun createRoute(startDate: String, startHour: Int, endDate: String, endHour: Int) =
             "football_match_list/$startDate/$startHour/$endDate/$endHour"
     }
     object FootballDetail : Screen("football_detail/{matchId}", "比赛详情") {
@@ -87,22 +87,50 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainScreen() {
     val navController = rememberNavController()
-    
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+    val showBottomBar = currentRoute in setOf(
+        Screen.Pick.route,
+        Screen.Mine.route,
+        Screen.More.route
+    )
+
     Scaffold(
         bottomBar = {
-            BottomNavigationBar(navController = navController)
+            if (showBottomBar) {
+                BottomNavigationBar(navController = navController)
+            }
         }
     ) { paddingValues ->
         NavHost(
             navController = navController,
-            startDestination = Screen.Football.route,
+            startDestination = Screen.Pick.route,
             modifier = Modifier.padding(paddingValues)
         ) {
+            composable(Screen.Pick.route) {
+                PickNumberScreen(
+                    onNavigateToSavedPicks = {
+                        navController.navigate(Screen.Mine.route) {
+                            popUpTo(Screen.Pick.route) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                )
+            }
+            composable(Screen.Mine.route) {
+                SavedPicksScreen(
+                    onManualCheck = { navController.navigate(Screen.ManualCheck.route) }
+                )
+            }
+            composable(Screen.More.route) {
+                MoreScreen(navController = navController)
+            }
+            composable(Screen.ManualCheck.route) {
+                ManualCheckScreen(navController = navController)
+            }
             composable(Screen.Football.route) {
                 FootballScreen(navController = navController)
-            }
-            composable(Screen.Lottery.route) {
-                LotteryScreen()
             }
             composable(
                 route = Screen.FootballMatchList.route,
@@ -138,23 +166,20 @@ fun MainScreen() {
 
 @Composable
 fun BottomNavigationBar(navController: NavHostController) {
-    val items = listOf(
-        Screen.Football,
-        Screen.Lottery
-    )
-    
+    val items = listOf(Screen.Pick, Screen.Mine, Screen.More)
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
-    
+
     NavigationBar {
         items.forEach { screen ->
             NavigationBarItem(
                 icon = {
                     Icon(
                         imageVector = when (screen) {
-                            Screen.Football -> Icons.Default.Home
-                            Screen.Lottery -> Icons.Default.DateRange
-                            else -> Icons.Default.Home
+                            Screen.Pick -> Icons.Default.Edit
+                            Screen.Mine -> Icons.Default.List
+                            Screen.More -> Icons.Default.MoreVert
+                            else -> Icons.Default.Edit
                         },
                         contentDescription = screen.title
                     )
@@ -177,6 +202,75 @@ fun BottomNavigationBar(navController: NavHostController) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+fun MoreScreen(navController: NavHostController) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Text(
+            text = "更多",
+            style = MaterialTheme.typography.headlineMedium,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        Text(
+            text = "次要工具与分析入口",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { navController.navigate(Screen.Football.route) },
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+            )
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "足球分析",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "查询赛程、查看推荐与历史对阵",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ManualCheckScreen(navController: NavHostController) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("手动对号") },
+                navigationIcon = {
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Text("←", fontSize = 24.sp)
+                    }
+                }
+            )
+        }
+    ) { paddingValues ->
+        Box(modifier = Modifier.padding(paddingValues)) {
+            Kl8CheckScreen()
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 fun FootballScreen(navController: NavHostController) {
     var startDateMillis by remember { mutableStateOf<Long?>(null) }
     var startHour by remember { mutableStateOf(0) }
@@ -189,9 +283,22 @@ fun FootballScreen(navController: NavHostController) {
     val dateTimeFormatter = remember { SimpleDateFormat("yyyy-MM-dd HH:00", Locale.getDefault()) }
     val dateFormatter = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
     
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("足球分析") },
+                navigationIcon = {
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Text("←", fontSize = 24.sp)
+                    }
+                }
+            )
+        }
+    ) { paddingValues ->
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .padding(paddingValues)
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -307,6 +414,7 @@ fun FootballScreen(navController: NavHostController) {
             },
             onDismiss = { showEndDateTimePicker = false }
         )
+    }
     }
 }
 
@@ -1278,7 +1386,7 @@ fun SmallOddsItem(label: String, odds: Double) {
     }
 }
 
-private fun formatIssueDate(issueDate: String): String {
+internal fun formatIssueDate(issueDate: String): String {
     return try {
         val inputFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.getDefault())
         inputFormat.timeZone = TimeZone.getTimeZone("UTC")
@@ -1290,61 +1398,8 @@ private fun formatIssueDate(issueDate: String): String {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun LotteryScreen() {
-    var selectedTab by remember { mutableIntStateOf(0) }
-
-    Column(
-        modifier = Modifier.fillMaxSize()
-    ) {
-        ScrollableTabRow(selectedTabIndex = selectedTab) {
-            Tab(
-                selected = selectedTab == 0,
-                onClick = { selectedTab = 0 },
-                text = { Text("号码预测") }
-            )
-            Tab(
-                selected = selectedTab == 1,
-                onClick = { selectedTab = 1 },
-                text = { Text("幸运选号") }
-            )
-            Tab(
-                selected = selectedTab == 2,
-                onClick = { selectedTab = 2 },
-                text = { Text("我的号码") }
-            )
-            Tab(
-                selected = selectedTab == 3,
-                onClick = { selectedTab = 3 },
-                text = { Text("快乐8验奖") }
-            )
-        }
-
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-        ) {
-            when (selectedTab) {
-                0 -> key("lottery_predict") {
-                    NumberInputScreen(onNavigateToSavedPicks = { selectedTab = 2 })
-                }
-                1 -> key("lottery_lucky") {
-                    LuckyNumberScreen(onNavigateToSavedPicks = { selectedTab = 2 })
-                }
-                2 -> key("lottery_saved") {
-                    SavedPicksScreen()
-                }
-                3 -> key("lottery_kl8") {
-                    Kl8CheckScreen()
-                }
-            }
-        }
-    }
-}
-
-internal val Kl8BallColor = Color(0xFFEF7B77)
+// Deep blackish-red for KL8 balls — higher contrast with white digits for older readers.
+internal val Kl8BallColor = Color(0xFF6B1414)
 private val Kl8MissBallColor = Color.White
 internal val Kl8ErrorColor = Color(0xFFE74C3C)
 
@@ -1403,7 +1458,7 @@ internal fun Kl8Ball(number: Int, style: Kl8BallStyle = Kl8BallStyle.Filled) {
     }
 }
 
-private fun LazyListScope.kl8Pick10ResultItems(tickets: List<List<Int>>) {
+internal fun LazyListScope.kl8Pick10ResultItems(tickets: List<List<Int>>) {
     val groupSize = 5
     val pricePerTicket = 2
     val groups = tickets.chunked(groupSize)
@@ -1575,7 +1630,7 @@ fun Kl8CheckScreen() {
                     Text(
                         text = checkBlockedReason,
                         fontSize = 12.sp,
-                        color = Color(0xFFEF7B77)
+                        color = Kl8BallColor
                     )
                 }
             }
@@ -1849,485 +1904,6 @@ fun Kl8CheckScreen() {
         }
     }
 }
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun NumberInputScreen(onNavigateToSavedPicks: () -> Unit = {}) {
-    var selectedLottery by remember { mutableStateOf("双色球") }
-    var predictions by remember { mutableStateOf<List<LotteryPrediction>>(emptyList()) }
-    var kl8Predictions by remember { mutableStateOf<List<List<Int>>>(emptyList()) }
-    var showPredictions by remember { mutableStateOf(false) }
-    var showKl8Predictions by remember { mutableStateOf(false) }
-    var ssqLastDraw by remember { mutableStateOf<SSQLastDrawResponse?>(null) }
-    var dltLastDraw by remember { mutableStateOf<DLTLastDrawResponse?>(null) }
-    var kl8LastDraw by remember { mutableStateOf<KL8LastDrawResponse?>(null) }
-    var targetIssueCode by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-
-    val isKl8 = selectedLottery == "快乐8"
-
-    LaunchedEffect(selectedLottery) {
-        predictions = emptyList()
-        kl8Predictions = emptyList()
-        showPredictions = false
-        showKl8Predictions = false
-        if (isKl8) {
-            ssqLastDraw = null
-            dltLastDraw = null
-            errorMessage = null
-            isLoading = true
-            try {
-                kl8LastDraw = RetrofitClient.apiService.getKL8LastDraw()
-                targetIssueCode = LotteryPicksHelper.nextIssueCode(kl8LastDraw!!.code)
-                isLoading = false
-            } catch (e: Exception) {
-                isLoading = false
-                errorMessage = "加载快乐8期号失败: ${e.message}"
-                kl8LastDraw = null
-            }
-            return@LaunchedEffect
-        }
-        kl8LastDraw = null
-        try {
-            isLoading = true
-            errorMessage = null
-            if (selectedLottery == "双色球") {
-                dltLastDraw = null
-                ssqLastDraw = RetrofitClient.apiService.getSSQLastDraw()
-                targetIssueCode = LotteryPicksHelper.nextIssueCode(ssqLastDraw!!.code)
-            } else {
-                ssqLastDraw = null
-                dltLastDraw = RetrofitClient.apiService.getDLTLastDraw()
-                targetIssueCode = LotteryPicksHelper.nextIssueCode(dltLastDraw!!.code)
-            }
-            isLoading = false
-        } catch (e: Exception) {
-            isLoading = false
-            errorMessage = "加载上期号码失败: ${e.message}"
-            ssqLastDraw = null
-            dltLastDraw = null
-        }
-    }
-
-    val frontNumbers = when (selectedLottery) {
-        "双色球" -> ssqLastDraw?.frontNumbers
-        "大乐透" -> dltLastDraw?.frontNumbers
-        else -> null
-    }
-    val lastDrawCode = when (selectedLottery) {
-        "双色球" -> ssqLastDraw?.code
-        "大乐透" -> dltLastDraw?.code
-        else -> null
-    }
-    val lastDrawDate = when (selectedLottery) {
-        "双色球" -> ssqLastDraw?.issueDate
-        "大乐透" -> dltLastDraw?.issueDate
-        else -> null
-    }
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        item(key = "title") {
-            Text(
-                text = "彩票号码预测器",
-                fontSize = 20.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 4.dp)
-            )
-        }
-
-        item(key = "lottery-type") {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                )
-            ) {
-                Column(modifier = Modifier.padding(8.dp)) {
-                    Text(
-                        text = "选择彩票类型：",
-                        fontSize = 14.sp,
-                        modifier = Modifier.padding(bottom = 4.dp)
-                    )
-                    listOf("双色球", "大乐透", "快乐8").forEach { lotteryType ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = selectedLottery == lotteryType,
-                                onClick = { selectedLottery = lotteryType }
-                            )
-                            Text(
-                                text = lotteryType,
-                                modifier = Modifier.padding(start = 8.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        item(key = "last-draw") {
-            if (!isKl8) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            text = "上期开奖号码",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-
-                        when {
-                            isLoading -> {
-                                CircularProgressIndicator(modifier = Modifier.size(32.dp))
-                                Text("正在加载...", fontSize = 12.sp)
-                            }
-                            errorMessage != null -> {
-                                Text(
-                                    text = errorMessage!!,
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.error,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
-                            frontNumbers != null -> {
-                                if (lastDrawCode != null) {
-                                    Text(
-                                        text = "期号：$lastDrawCode",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                if (lastDrawDate != null) {
-                                    Text(
-                                        text = "开奖日期：${formatIssueDate(lastDrawDate)}",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    frontNumbers.forEach { number ->
-                                        Box(
-                                            modifier = Modifier
-                                                .size(36.dp)
-                                                .background(
-                                                    color = MaterialTheme.colorScheme.error,
-                                                    shape = CircleShape
-                                                ),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = number.toString(),
-                                                fontSize = 14.sp,
-                                                color = MaterialTheme.colorScheme.onError,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
-
-                                    if (selectedLottery == "双色球" && ssqLastDraw != null) {
-                                        Text(text = "+", fontSize = 14.sp)
-                                        Box(
-                                            modifier = Modifier
-                                                .size(36.dp)
-                                                .background(
-                                                    color = MaterialTheme.colorScheme.primary,
-                                                    shape = CircleShape
-                                                ),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = ssqLastDraw!!.backNumber.toString(),
-                                                fontSize = 14.sp,
-                                                color = MaterialTheme.colorScheme.onPrimary,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
-
-                                    if (selectedLottery == "大乐透" && dltLastDraw != null) {
-                                        Text(text = "+", fontSize = 14.sp)
-                                        dltLastDraw!!.backNumbers.forEach { number ->
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(36.dp)
-                                                    .background(
-                                                        color = MaterialTheme.colorScheme.primary,
-                                                        shape = CircleShape
-                                                    ),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    text = number.toString(),
-                                                    fontSize = 14.sp,
-                                                    color = MaterialTheme.colorScheme.onPrimary,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            } else {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = "快乐8 选十",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = "1-80 号码矩阵选号，共 16 注，每注 10 个号码",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(top = 6.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        item(key = "generate-btn") {
-            Button(
-                onClick = {
-                    try {
-                        if (isKl8) {
-                            kl8Predictions = LotteryPredictor.generateKl8Pick10Matrix()
-                            showKl8Predictions = true
-                            showPredictions = false
-                        } else {
-                            val inputNumbers = frontNumbers ?: return@Button
-                            predictions = if (selectedLottery == "双色球") {
-                                LotteryPredictor.processDoubleColorBall(inputNumbers)
-                            } else {
-                                LotteryPredictor.processDaLeTou(inputNumbers)
-                            }
-                            showPredictions = true
-                            showKl8Predictions = false
-                        }
-                    } catch (e: Exception) {
-                        predictions = emptyList()
-                        kl8Predictions = emptyList()
-                        showPredictions = false
-                        showKl8Predictions = false
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(40.dp),
-                enabled = isKl8 || (!isLoading && frontNumbers != null),
-                colors = if (isKl8) {
-                    ButtonDefaults.buttonColors(containerColor = Kl8BallColor)
-                } else {
-                    ButtonDefaults.buttonColors()
-                }
-            ) {
-                Text("生成预测号码", fontSize = 14.sp)
-            }
-        }
-
-        if (!isKl8 && showPredictions && predictions.isNotEmpty()) {
-            item(key = "ssq-dlt-predictions") {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    )
-                ) {
-                    Column(modifier = Modifier.padding(8.dp)) {
-                        Text(
-                            text = "预测号码：",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            predictions.forEachIndexed { index, prediction ->
-                                val groupNames = if (selectedLottery == "双色球") {
-                                    listOf("第1组", "第2组", "第3组", "第4组", "第5组")
-                                } else {
-                                    listOf("第1组", "第2组", "第3组", "第4组", "第5组", "第6组")
-                                }
-                                val groupName = if (index < groupNames.size) groupNames[index] else "第${index + 1}组"
-
-                                Card(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 1.dp),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.surface
-                                    )
-                                ) {
-                                    Column(modifier = Modifier.padding(4.dp)) {
-                                        Text(
-                                            text = groupName,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            modifier = Modifier.padding(bottom = 2.dp)
-                                        )
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.Start
-                                        ) {
-                                            val redBallCount = if (selectedLottery == "双色球") 6 else 5
-                                            prediction.redBalls.take(redBallCount).forEach { ball ->
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(20.dp)
-                                                        .padding(horizontal = 1.dp)
-                                                        .background(
-                                                            color = MaterialTheme.colorScheme.error,
-                                                            shape = CircleShape
-                                                        ),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text(
-                                                        text = ball.toString(),
-                                                        fontSize = 8.sp,
-                                                        color = MaterialTheme.colorScheme.onError
-                                                    )
-                                                }
-                                            }
-                                            Text(
-                                                text = " + ",
-                                                fontSize = 10.sp,
-                                                modifier = Modifier.padding(horizontal = 2.dp)
-                                            )
-                                            if (selectedLottery == "双色球") {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(20.dp)
-                                                        .background(
-                                                            color = MaterialTheme.colorScheme.primary,
-                                                            shape = CircleShape
-                                                        ),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text(
-                                                        text = prediction.blueBall.toString(),
-                                                        fontSize = 8.sp,
-                                                        color = MaterialTheme.colorScheme.onPrimary
-                                                    )
-                                                }
-                                            } else {
-                                                val blueBallCount = 2
-                                                prediction.redBalls.drop(redBallCount).take(blueBallCount).forEach { ball ->
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size(20.dp)
-                                                            .padding(horizontal = 1.dp)
-                                                            .background(
-                                                                color = MaterialTheme.colorScheme.primary,
-                                                                shape = CircleShape
-                                                            ),
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Text(
-                                                            text = ball.toString(),
-                                                            fontSize = 8.sp,
-                                                            color = MaterialTheme.colorScheme.onPrimary
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            item(key = "save-ssq-dlt-predictions") {
-                val pickItems = if (selectedLottery == "双色球") {
-                    LotteryPicksHelper.buildSsqPicksFromPredictions(predictions)
-                } else {
-                    LotteryPicksHelper.buildDltPicksFromPredictions(predictions)
-                }
-                SavePicksBar(
-                    contentKey = LotteryPicksHelper.contentKey(pickItems),
-                    issueCode = targetIssueCode,
-                    pickCount = pickItems.size,
-                    onIssueCodeChange = { targetIssueCode = it },
-                    onSave = {
-                        RetrofitClient.apiService.savePicks(
-                            SavePicksRequest(
-                                lotteryType = LotteryPicksHelper.lotteryTypeCode(selectedLottery),
-                                issueCode = targetIssueCode,
-                                source = "generate",
-                                picks = pickItems
-                            )
-                        )
-                    },
-                    onSaved = onNavigateToSavedPicks
-                )
-            }
-        }
-
-        if (isKl8 && showKl8Predictions && kl8Predictions.isNotEmpty()) {
-            kl8Pick10ResultItems(kl8Predictions)
-
-            item(key = "save-kl8-predictions") {
-                val pickItems = LotteryPicksHelper.buildKl8Picks(kl8Predictions)
-                SavePicksBar(
-                    contentKey = LotteryPicksHelper.contentKey(pickItems),
-                    issueCode = targetIssueCode,
-                    pickCount = pickItems.size,
-                    onIssueCodeChange = { targetIssueCode = it },
-                    onSave = {
-                        RetrofitClient.apiService.savePicks(
-                            SavePicksRequest(
-                                lotteryType = "kl8",
-                                issueCode = targetIssueCode,
-                                source = "generate",
-                                picks = pickItems
-                            )
-                        )
-                    },
-                    onSaved = onNavigateToSavedPicks,
-                    buttonColor = Kl8BallColor
-                )
-            }
-        }
-    }
-}
-
 // 日期时间选择器对话框（组合日期和时间）
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -2435,188 +2011,6 @@ fun DateTimePickerDialog(
         }
     }
 }
-
-// 幸运选号界面
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun LuckyNumberScreen(onNavigateToSavedPicks: () -> Unit = {}) {
-    var ssqResults by remember { mutableStateOf<SSQResponse?>(null) }
-    var dltResults by remember { mutableStateOf<DLTResponse?>(null) }
-    var ssqLastDraw by remember { mutableStateOf<SSQLastDrawResponse?>(null) }
-    var dltLastDraw by remember { mutableStateOf<DLTLastDrawResponse?>(null) }
-    var ssqIssueCode by remember { mutableStateOf("") }
-    var dltIssueCode by remember { mutableStateOf("") }
-    var isLoadingSSQ by remember { mutableStateOf(false) }
-    var isLoadingDLT by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    val coroutineScope = rememberCoroutineScope()
-    val scrollState = rememberScrollState()
-
-    LaunchedEffect(Unit) {
-        try {
-            ssqLastDraw = RetrofitClient.apiService.getSSQLastDraw()
-            ssqIssueCode = LotteryPicksHelper.nextIssueCode(ssqLastDraw!!.code)
-        } catch (_: Exception) {
-        }
-        try {
-            dltLastDraw = RetrofitClient.apiService.getDLTLastDraw()
-            dltIssueCode = LotteryPicksHelper.nextIssueCode(dltLastDraw!!.code)
-        } catch (_: Exception) {
-        }
-    }
-    
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(scrollState)
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        Text(
-            text = "幸运选号",
-            fontSize = 24.sp,
-            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-        
-        // 两个小按钮：双色球/大乐透
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // 双色球按钮
-            Button(
-                onClick = {
-                    coroutineScope.launch {
-                        try {
-                            isLoadingSSQ = true
-                            errorMessage = null
-                            dltResults = null // 清空大乐透结果
-                            // 调用API获取双色球幸运号码（默认5注）
-                            // 算法说明：从最新期（rows[-1]）的前区号码（遗漏为0）中随机选3个并剔除
-                            // 剔除后剩余3个遗漏为0的号码，然后基于遗漏次数中位数计算概率选号
-                            ssqResults = RetrofitClient.apiService.getSSQLuckyNumbers(n = 5)
-                            isLoadingSSQ = false
-                        } catch (e: Exception) {
-                            isLoadingSSQ = false
-                            errorMessage = "加载失败: ${e.message}"
-                        }
-                    }
-                },
-                modifier = Modifier
-                    .weight(1f)
-                    .height(48.dp),
-                enabled = !isLoadingSSQ
-            ) {
-                if (isLoadingSSQ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                } else {
-                    Text("双色球", fontSize = 16.sp)
-                }
-            }
-            
-            // 大乐透按钮
-            Button(
-                onClick = {
-                    coroutineScope.launch {
-                        try {
-                            isLoadingDLT = true
-                            errorMessage = null
-                            ssqResults = null // 清空双色球结果
-                            // 调用API获取大乐透幸运号码（默认3注）
-                            // 算法说明：从最新期（rows[-1]）的前区号码（遗漏为0）中随机选3个并剔除
-                            // 剔除后剩余2个遗漏为0的号码，然后基于遗漏次数中位数计算概率选号
-                            dltResults = RetrofitClient.apiService.getDLTLuckyNumbers(n = 3)
-                            isLoadingDLT = false
-                        } catch (e: Exception) {
-                            isLoadingDLT = false
-                            errorMessage = "加载失败: ${e.message}"
-                        }
-                    }
-                },
-                modifier = Modifier
-                    .weight(1f)
-                    .height(48.dp),
-                enabled = !isLoadingDLT
-            ) {
-                if (isLoadingDLT) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                } else {
-                    Text("大乐透", fontSize = 16.sp)
-                }
-            }
-        }
-        
-        // 错误提示
-        if (errorMessage != null) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer
-                )
-            ) {
-                Text(
-                    text = errorMessage!!,
-                    modifier = Modifier.padding(16.dp),
-                    color = MaterialTheme.colorScheme.onErrorContainer
-                )
-            }
-        }
-        
-        // 显示结果
-        if (ssqResults != null) {
-            val ssqPickItems = LotteryPicksHelper.buildSsqPicks(ssqResults!!.results)
-            SSQResultsDisplay(ssqResults!!)
-            SavePicksBar(
-                contentKey = LotteryPicksHelper.contentKey(ssqPickItems),
-                issueCode = ssqIssueCode,
-                pickCount = ssqResults!!.results.size,
-                onIssueCodeChange = { ssqIssueCode = it },
-                onSave = {
-                    RetrofitClient.apiService.savePicks(
-                        SavePicksRequest(
-                            lotteryType = "ssq",
-                            issueCode = ssqIssueCode,
-                            source = "generate",
-                            picks = ssqPickItems
-                        )
-                    )
-                },
-                onSaved = onNavigateToSavedPicks
-            )
-        }
-
-        if (dltResults != null) {
-            val dltPickItems = LotteryPicksHelper.buildDltPicks(dltResults!!.results)
-            DLTResultsDisplay(dltResults!!)
-            SavePicksBar(
-                contentKey = LotteryPicksHelper.contentKey(dltPickItems),
-                issueCode = dltIssueCode,
-                pickCount = dltResults!!.results.size,
-                onIssueCodeChange = { dltIssueCode = it },
-                onSave = {
-                    RetrofitClient.apiService.savePicks(
-                        SavePicksRequest(
-                            lotteryType = "dlt",
-                            issueCode = dltIssueCode,
-                            source = "generate",
-                            picks = dltPickItems
-                        )
-                    )
-                },
-                onSaved = onNavigateToSavedPicks
-            )
-        }
-    }
-}
-
 // 双色球结果显示
 @Composable
 fun SSQResultsDisplay(response: SSQResponse) {
@@ -2851,7 +2245,7 @@ fun DLTResultsDisplay(response: DLTResponse) {
 
 @Preview(showBackground = true)
 @Composable
-fun NumberInputScreenPreview() {
+fun MainScreenPreview() {
     LuckwoodTheme {
         MainScreen()
     }

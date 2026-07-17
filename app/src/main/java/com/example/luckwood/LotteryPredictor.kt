@@ -175,53 +175,233 @@ object LotteryPredictor {
     private const val KL8_PICK_COUNT = 10
     private const val KL8_GROUP_COUNT = 8
     private const val KL8_SHUFFLE_TIMES_DEFAULT = 3
+    private const val KL8_DEFAULT_BET_COUNT = 20
+    private const val KL8_MIN_BET_COUNT = 1
+    private const val KL8_MAX_OUTER_ROUNDS = 12
+    private const val KL8_MAX_CANDIDATE_TRIES_PER_BET = 800
+    private const val KL8_MAX_OVERLAP = 2
 
-    private fun shuffleKl8Pool(shuffleTimes: Int): List<Int> {
-        val pool = (KL8_POOL_MIN..KL8_POOL_MAX).toMutableList()
-        repeat(shuffleTimes) {
-            pool.shuffle()
+    data class Kl8GenerationResult(
+        val requestedCount: Int,
+        val generatedCount: Int,
+        val bets: List<List<Int>>,
+        val completed: Boolean,
+        val reason: String? = null
+    )
+
+    /** Bitmask for numbers 1..80 (bit 0 unused). */
+    private data class Kl8Mask(val lo: Long, val hi: Long) {
+        fun overlapCount(other: Kl8Mask): Int {
+            return java.lang.Long.bitCount(lo and other.lo) +
+                java.lang.Long.bitCount(hi and other.hi)
         }
+    }
+
+    private fun kl8MaskOf(numbers: List<Int>): Kl8Mask {
+        var lo = 0L
+        var hi = 0L
+        for (n in numbers) {
+            when {
+                n in 1..63 -> lo = lo or (1L shl n)
+                n in 64..80 -> hi = hi or (1L shl (n - 64))
+            }
+        }
+        return Kl8Mask(lo, hi)
+    }
+
+    private fun shuffleKl8Pool(shuffleTimes: Int, random: Random = Random.Default): List<Int> {
+        val pool = (KL8_POOL_MIN..KL8_POOL_MAX).toMutableList()
+        repeat(shuffleTimes) { pool.shuffle(random) }
         return pool
     }
 
-    private fun splitKl8IntoGroups(pool: List<Int>, groupCount: Int, pickCount: Int): List<List<Int>> {
+    internal fun createKl8BaseGroups(
+        pool: List<Int>,
+        groupCount: Int = KL8_GROUP_COUNT,
+        pickCount: Int = KL8_PICK_COUNT
+    ): List<List<Int>> {
         val expected = groupCount * pickCount
         require(pool.size == expected) { "号码池长度应为 $expected，实际为 ${pool.size}" }
         return (0 until groupCount).map { i ->
-            pool.subList(i * pickCount, (i + 1) * pickCount)
+            pool.subList(i * pickCount, (i + 1) * pickCount).toList()
         }
     }
 
-    private fun buildKl8MatrixGroups(pool: List<Int>, rows: Int = 8, cols: Int = 10): List<List<Int>> {
-        val expected = rows * cols
-        require(pool.size == expected) { "号码池长度应为 $expected，实际为 ${pool.size}" }
+    internal fun getKl8IntersectionCount(first: List<Int>, second: List<Int>): Int {
+        return kl8MaskOf(first).overlapCount(kl8MaskOf(second))
+    }
 
-        val matrix = (0 until rows).map { row ->
-            pool.subList(row * cols, (row + 1) * cols)
+    private fun isKl8Compatible(candidate: Kl8Mask, existing: List<Kl8Mask>): Boolean {
+        for (mask in existing) {
+            if (candidate.overlapCount(mask) > KL8_MAX_OVERLAP) return false
         }
+        return true
+    }
 
-        val prefixGroups = (0 until 8).map { col ->
-            (0 until rows).map { row -> matrix[row][col] }
+    private fun hasKl8GlobalOverlapViolation(bets: List<List<Int>>): Boolean {
+        val masks = bets.map { kl8MaskOf(it) }
+        for (i in 0 until masks.size - 1) {
+            for (j in i + 1 until masks.size) {
+                if (masks[i].overlapCount(masks[j]) > KL8_MAX_OVERLAP) return true
+            }
         }
-
-        val remaining = (0 until rows).flatMap { row ->
-            (8 until cols).map { col -> matrix[row][col] }
-        }.toMutableList()
-        remaining.shuffle()
-
-        return (0 until KL8_GROUP_COUNT).map { i ->
-            prefixGroups[i] + remaining.subList(i * 2, (i + 1) * 2)
-        }
+        return false
     }
 
     /**
-     * 快乐8选十矩阵选号：切分 8 组 + 矩阵法 8 组，共 16 注
+     * Build one bet by taking 2 numbers from two base groups and 1 from each of the rest
+     * (8 groups → 2+2+1*6 = 10). Prefer under-used numbers for balance.
      */
-    fun generateKl8Pick10Matrix(shuffleTimes: Int = KL8_SHUFFLE_TIMES_DEFAULT): List<List<Int>> {
+    private fun generateKl8GroupCandidate(
+        baseGroups: List<List<Int>>,
+        usage: IntArray,
+        random: Random
+    ): List<Int> {
+        val doubleGroups = (0 until KL8_GROUP_COUNT).shuffled(random).take(2).toSet()
+        val picked = ArrayList<Int>(KL8_PICK_COUNT)
+        baseGroups.forEachIndexed { index, group ->
+            val need = if (index in doubleGroups) 2 else 1
+            val preferred = group.sortedWith(
+                compareBy<Int> { usage[it] }.thenBy { random.nextInt() }
+            )
+            picked.addAll(preferred.take(need))
+        }
+        return picked.sorted()
+    }
+
+    /** Weighted random 10-number sample; lower usage ⇒ higher weight. */
+    private fun generateKl8WeightedCandidate(usage: IntArray, random: Random): List<Int> {
+        val weights = DoubleArray(KL8_POOL_MAX + 1)
+        var total = 0.0
+        for (n in KL8_POOL_MIN..KL8_POOL_MAX) {
+            val w = 1.0 / (1.0 + usage[n])
+            weights[n] = w
+            total += w
+        }
+        val chosen = LinkedHashSet<Int>(KL8_PICK_COUNT)
+        var guard = 0
+        while (chosen.size < KL8_PICK_COUNT && guard < 200) {
+            guard++
+            var r = random.nextDouble() * total
+            var picked = KL8_POOL_MIN
+            for (n in KL8_POOL_MIN..KL8_POOL_MAX) {
+                r -= weights[n]
+                if (r <= 0.0) {
+                    picked = n
+                    break
+                }
+            }
+            if (chosen.add(picked)) {
+                total -= weights[picked]
+                weights[picked] = 0.0
+            }
+        }
+        // Fallback if floating error left us short.
+        if (chosen.size < KL8_PICK_COUNT) {
+            for (n in (KL8_POOL_MIN..KL8_POOL_MAX).shuffled(random)) {
+                chosen.add(n)
+                if (chosen.size == KL8_PICK_COUNT) break
+            }
+        }
+        return chosen.sorted()
+    }
+
+    private fun registerKl8Usage(bet: List<Int>, usage: IntArray) {
+        for (n in bet) usage[n]++
+    }
+
+    /**
+     * 快乐8选十低重复选号：
+     * - 前 8 注：1–80 洗牌切分为 8 组（两两不重复）
+     * - 后续注：分组构造 + 加权随机采样，用 bitset 校验任意两注最多重复 2 个号码
+     */
+    fun generateKl8Pick10Detailed(
+        count: Int = KL8_DEFAULT_BET_COUNT,
+        shuffleTimes: Int = KL8_SHUFFLE_TIMES_DEFAULT
+    ): Kl8GenerationResult {
+        require(count >= KL8_MIN_BET_COUNT) { "生成注数必须大于等于 1" }
         require(shuffleTimes > 0) { "打乱次数必须大于 0" }
-        val pool = shuffleKl8Pool(shuffleTimes)
-        val firstBatch = splitKl8IntoGroups(pool, KL8_GROUP_COUNT, KL8_PICK_COUNT)
-        val secondBatch = buildKl8MatrixGroups(pool)
-        return (firstBatch + secondBatch).map { it.sorted() }
+
+        var bestBets = emptyList<List<Int>>()
+        val random = Random.Default
+
+        repeat(KL8_MAX_OUTER_ROUNDS) {
+            val baseGroups = createKl8BaseGroups(shuffleKl8Pool(shuffleTimes, random))
+            if (count <= KL8_GROUP_COUNT) {
+                val bets = baseGroups.take(count).map { it.sorted() }
+                return Kl8GenerationResult(count, bets.size, bets, completed = true)
+            }
+
+            val bets = baseGroups.map { it.sorted() }.toMutableList()
+            val masks = bets.map { kl8MaskOf(it) }.toMutableList()
+            val usage = IntArray(KL8_POOL_MAX + 1)
+            bets.forEach { registerKl8Usage(it, usage) }
+
+            var stuck = 0
+            while (bets.size < count) {
+                var accepted: List<Int>? = null
+                for (tryIndex in 0 until KL8_MAX_CANDIDATE_TRIES_PER_BET) {
+                    val candidate = if (tryIndex % 2 == 0) {
+                        generateKl8GroupCandidate(baseGroups, usage, random)
+                    } else {
+                        generateKl8WeightedCandidate(usage, random)
+                    }
+                    if (candidate.size != KL8_PICK_COUNT || candidate.toSet().size != KL8_PICK_COUNT) {
+                        continue
+                    }
+                    val mask = kl8MaskOf(candidate)
+                    if (isKl8Compatible(mask, masks)) {
+                        accepted = candidate
+                        break
+                    }
+                }
+
+                val chosen = accepted
+                if (chosen != null) {
+                    bets.add(chosen)
+                    masks.add(kl8MaskOf(chosen))
+                    registerKl8Usage(chosen, usage)
+                    stuck = 0
+                } else {
+                    stuck++
+                    // Light backtrack: drop a few recent remix bets and retry.
+                    if (stuck <= 3 && bets.size > KL8_GROUP_COUNT) {
+                        val removeCount = minOf(3, bets.size - KL8_GROUP_COUNT)
+                        repeat(removeCount) {
+                            val removed = bets.removeAt(bets.lastIndex)
+                            masks.removeAt(masks.lastIndex)
+                            for (n in removed) usage[n]--
+                        }
+                        stuck = 0
+                    } else {
+                        break
+                    }
+                }
+            }
+
+            if (bets.size > bestBets.size) bestBets = bets.toList()
+            if (bets.size == count && !hasKl8GlobalOverlapViolation(bets)) {
+                return Kl8GenerationResult(count, bets.size, bets, completed = true)
+            }
+        }
+
+        return Kl8GenerationResult(
+            requestedCount = count,
+            generatedCount = bestBets.size,
+            bets = bestBets,
+            completed = false,
+            reason = "无法在当前搜索限制内继续生成满足任意两注最多重复2个号码的组合"
+        )
+    }
+
+    fun generateKl8Pick10Matrix(
+        count: Int = KL8_DEFAULT_BET_COUNT,
+        shuffleTimes: Int = KL8_SHUFFLE_TIMES_DEFAULT
+    ): List<List<Int>> {
+        val result = generateKl8Pick10Detailed(count, shuffleTimes)
+        if (!result.completed) {
+            throw IllegalStateException(result.reason)
+        }
+        return result.bets
     }
 } 

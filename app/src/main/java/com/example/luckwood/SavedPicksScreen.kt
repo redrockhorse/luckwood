@@ -41,7 +41,9 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun SavedPicksScreen() {
+fun SavedPicksScreen(
+    onManualCheck: (() -> Unit)? = null
+) {
     var lotteryFilter by remember { mutableStateOf<String?>(null) }
     var statusFilter by remember { mutableStateOf<String?>(null) }
     var batches by remember { mutableStateOf<List<LotteryPicksHelper.PickBatch>>(emptyList()) }
@@ -55,7 +57,7 @@ fun SavedPicksScreen() {
     var lastDrawnIssueCodes by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     val coroutineScope = rememberCoroutineScope()
 
-    LaunchedEffect(Unit) {
+    suspend fun refreshLastDrawnIssueCodes() {
         val codes = mutableMapOf<String, String>()
         try {
             codes["ssq"] = RetrofitClient.apiService.getSSQLastDraw().code
@@ -77,6 +79,7 @@ fun SavedPicksScreen() {
             try {
                 isLoading = true
                 loadErrorMessage = null
+                refreshLastDrawnIssueCodes()
                 val response = RetrofitClient.apiService.getPicks(
                     lotteryType = lotteryFilter,
                     status = statusFilter
@@ -104,11 +107,22 @@ fun SavedPicksScreen() {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item(key = "title") {
-            Text(
-                text = "我的号码",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "号码本",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                if (onManualCheck != null) {
+                    TextButton(onClick = onManualCheck) {
+                        Text("手动对号", fontSize = 13.sp)
+                    }
+                }
+            }
         }
 
         item(key = "lottery-filter") {
@@ -191,7 +205,6 @@ fun SavedPicksScreen() {
             val batchKey = "${batch.batchId ?: pickId}-${batch.issueCode}"
             SavedPickBatchCard(
                 batch = batch,
-                batchKey = batchKey,
                 isExpanded = expandedBatchKey == batchKey,
                 checkResult = checkResults[batchKey],
                 isChecking = checkingBatchKey == batchKey,
@@ -212,6 +225,7 @@ fun SavedPicksScreen() {
                     coroutineScope.launch {
                         try {
                             actionErrorMessage = null
+                            refreshLastDrawnIssueCodes()
                             val result = RetrofitClient.apiService.checkPicks(
                                 lotteryType = batch.lotteryType,
                                 issueCode = batch.issueCode
@@ -251,7 +265,6 @@ fun SavedPicksScreen() {
 @Composable
 private fun SavedPickBatchCard(
     batch: LotteryPicksHelper.PickBatch,
-    batchKey: String,
     isExpanded: Boolean,
     checkResult: PickCheckResponse?,
     isChecking: Boolean,
@@ -271,6 +284,16 @@ private fun SavedPickBatchCard(
         batch.issueCode,
         lastDrawnCode
     )
+    val displayStatus = LotteryPicksHelper.batchDisplayStatus(
+        status = status,
+        canCheck = canCheck,
+        hasCheckResult = checkResult != null
+    )
+    val statusColor = when {
+        checkResult != null || status == "settled" -> Color(0xFF2E7D32)
+        canCheck -> Color(0xFFE65100)
+        else -> Kl8BallColor
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -291,21 +314,13 @@ private fun SavedPickBatchCard(
                     modifier = Modifier.padding(top = 4.dp)
                 )
                 Text(
-                    text = if (!canCheck) {
-                        "待开奖 · 期号 ${batch.issueCode}"
-                    } else {
-                        LotteryPicksHelper.statusLabel(status)
-                    },
+                    text = displayStatus,
                     fontSize = 12.sp,
-                    color = if (canCheck && status == "settled") {
-                        Color(0xFF2E7D32)
-                    } else {
-                        Color(0xFFEF7B77)
-                    },
+                    color = statusColor,
                     modifier = Modifier.padding(top = 4.dp)
                 )
                 Box(modifier = Modifier.fillMaxWidth()) {
-                    if (!canCheck && checkBlockedReason != null) {
+                    if (!canCheck && checkBlockedReason != null && checkResult == null) {
                         Text(
                             text = checkBlockedReason,
                             fontSize = 11.sp,
@@ -362,12 +377,15 @@ private fun SavedPickBatchCard(
             }
 
             Box(modifier = Modifier.fillMaxWidth()) {
-                if (isExpanded) {
-                    SavedBatchPickPreview(batch = batch)
+                if (isExpanded && checkResult == null) {
+                    SavedPicksPreviewSection(
+                        batch = batch,
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
                 }
             }
             Box(modifier = Modifier.fillMaxWidth()) {
-                if (isExpanded && !canCheck) {
+                if (isExpanded && !canCheck && checkResult == null) {
                     Text(
                         text = "该期尚未开奖，开奖后可点「兑奖」查看命中与奖金",
                         fontSize = 12.sp,
@@ -384,53 +402,6 @@ private fun SavedPickBatchCard(
                     )
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun SavedBatchPickPreview(batch: LotteryPicksHelper.PickBatch) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Text(text = "保存号码", fontSize = 13.sp, color = Color(0xFF888888))
-        batch.picks.forEachIndexed { index, pick ->
-            if (LotteryPicksHelper.isKl8Type(pick.lotteryType)) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(text = "第 ${index + 1} 注", fontSize = 12.sp, color = Color(0xFF999999))
-                    Kl8BallFlowRow(numbers = pick.numbers?.sorted() ?: emptyList())
-                }
-            } else {
-                SavedSsqDltPickRow(index = index, pick = pick)
-            }
-        }
-    }
-}
-
-@Composable
-private fun SavedSsqDltPickRow(index: Int, pick: LotteryPick) {
-    val isSsq = pick.lotteryType.equals("ssq", ignoreCase = true) ||
-        pick.lotteryType.contains("双色")
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = "第 ${index + 1} 注",
-            fontSize = 12.sp,
-            color = Color(0xFF999999),
-            modifier = Modifier.padding(end = 4.dp)
-        )
-        pick.frontNumbers?.forEach { number ->
-            Kl8Ball(number, Kl8BallStyle.Filled)
-        }
-        pick.backNumbers?.forEach { number ->
-            Text(text = "+", fontSize = 12.sp)
-            Kl8Ball(number, if (isSsq) Kl8BallStyle.Win else Kl8BallStyle.Hit)
         }
     }
 }
@@ -548,7 +519,7 @@ fun SavePicksBar(
                         )
                         if (!message.startsWith("保存失败")) {
                             TextButton(onClick = onSaved) {
-                                Text("查看我的号码", fontSize = 12.sp)
+                                Text("查看号码本", fontSize = 12.sp)
                             }
                         }
                     }

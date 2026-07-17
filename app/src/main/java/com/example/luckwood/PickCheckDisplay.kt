@@ -276,6 +276,141 @@ fun LazyListScope.pickCheckResultItems(
     }
 }
 
+/** 未兑奖时展示保存号码，布局与兑奖结果中的「我的号码」一致（5 注一组） */
+@Composable
+fun SavedPicksPreviewSection(
+    batch: LotteryPicksHelper.PickBatch,
+    modifier: Modifier = Modifier
+) {
+    val picks = LotteryPicksHelper.sortPicksForDisplay(batch.picks)
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(text = "我的号码", fontSize = 14.sp, color = Color(0xFF888888))
+        if (LotteryPicksHelper.isKl8Type(batch.lotteryType)) {
+            Kl8SavedPicksGroupedSection(picks = picks)
+        } else {
+            SsqDltSavedPicksGroupedSection(picks = picks)
+        }
+    }
+}
+
+@Composable
+private fun Kl8SavedPicksGroupedSection(picks: List<LotteryPick>) {
+    val tickets = picks.map { it.numbers?.sorted() ?: emptyList() }
+    val groups = tickets.chunked(Kl8PrizeChecker.GROUP_SIZE)
+    groups.forEachIndexed { groupIndex, groupTickets ->
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFF8F8F8))
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = "第 ${groupIndex + 1} 组 · ${groupTickets.size} 注",
+                        fontSize = 13.sp,
+                        color = Color(0xFF888888)
+                    )
+                }
+                groupTickets.forEachIndexed { ticketIndex, numbers ->
+                    val globalIndex = groupIndex * Kl8PrizeChecker.GROUP_SIZE + ticketIndex
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp)
+                    ) {
+                        Text(
+                            text = "第 ${globalIndex + 1} 注",
+                            fontSize = 12.sp,
+                            color = Color(0xFF999999),
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                        Kl8BallFlowRow(numbers = numbers)
+                    }
+                    if (ticketIndex < groupTickets.lastIndex) {
+                        Divider(
+                            modifier = Modifier.padding(horizontal = 14.dp),
+                            color = Color(0xFFDDDDDD)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SsqDltSavedPicksGroupedSection(picks: List<LotteryPick>) {
+    val groups = picks.chunked(Kl8PrizeChecker.GROUP_SIZE)
+    groups.forEachIndexed { groupIndex, groupPicks ->
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFF8F8F8))
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = "第 ${groupIndex + 1} 组 · ${groupPicks.size} 注",
+                        fontSize = 13.sp,
+                        color = Color(0xFF888888)
+                    )
+                }
+                groupPicks.forEachIndexed { ticketIndex, pick ->
+                    val globalIndex = groupIndex * Kl8PrizeChecker.GROUP_SIZE + ticketIndex
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp)
+                    ) {
+                        Text(
+                            text = "第 ${globalIndex + 1} 注",
+                            fontSize = 12.sp,
+                            color = Color(0xFF999999),
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            pick.frontNumbers?.forEach { number ->
+                                LotteryNumberBall(number = number, isHit = true, isBack = false, size = 26.dp)
+                            }
+                            pick.backNumbers?.forEach { number ->
+                                Text(text = "+", fontSize = 12.sp)
+                                LotteryNumberBall(
+                                    number = number,
+                                    isHit = true,
+                                    isBack = true,
+                                    size = 26.dp
+                                )
+                            }
+                        }
+                    }
+                    if (ticketIndex < groupPicks.lastIndex) {
+                        Divider(
+                            modifier = Modifier.padding(horizontal = 14.dp),
+                            color = Color(0xFFDDDDDD)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun PickCheckSummaryCard(response: PickCheckResponse) {
     val summary = response.summary

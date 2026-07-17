@@ -93,6 +93,23 @@ object LotteryPicksHelper {
         return e.message ?: "未知错误"
     }
 
+    fun batchDisplayStatus(
+        status: String?,
+        canCheck: Boolean,
+        hasCheckResult: Boolean
+    ): String = when {
+        hasCheckResult -> "已验奖"
+        status == "settled" -> "已兑奖"
+        status == "cancelled" -> "已取消"
+        canCheck -> "待验奖"
+        else -> statusLabel(status)
+    }
+
+    /** 同一批内按 id 升序，与兑奖接口返回的「我的号码」顺序一致 */
+    fun sortPicksForDisplay(picks: List<LotteryPick>): List<LotteryPick> {
+        return picks.sortedBy { it.id }
+    }
+
     fun statusLabel(status: String?): String = when (status) {
         "pending" -> "待开奖"
         "settled" -> "已兑奖"
@@ -185,7 +202,7 @@ object LotteryPicksHelper {
                     batchId = first.batchId,
                     lotteryType = first.lotteryType,
                     issueCode = first.issueCode,
-                    picks = groupPicks.sortedByDescending { it.id },
+                    picks = sortPicksForDisplay(groupPicks),
                     createdAt = groupPicks.maxByOrNull { it.createdAt ?: "" }?.createdAt
                 )
             }
